@@ -73,6 +73,43 @@ ipcMain.handle("health:check", async () => {
   }
 });
 
+ipcMain.handle("system:status", async () => {
+  try {
+    const response = await fetch("http://127.0.0.1:8000/system/status");
+    if (!response.ok) {
+      return {
+        api: {
+          status: "unreachable",
+          version: "0.1.0",
+        },
+        app: {
+          name: "Mentor AMP",
+          environment: "development",
+        },
+        database: {
+          status: "not_connected",
+        },
+      };
+    }
+
+    return await response.json();
+  } catch {
+    return {
+      api: {
+        status: "unreachable",
+        version: "0.1.0",
+      },
+      app: {
+        name: "Mentor AMP",
+        environment: "development",
+      },
+      database: {
+        status: "not_connected",
+      },
+    };
+  }
+});
+
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.

@@ -1,42 +1,66 @@
 import { useEffect, useState } from "react";
-import { healthApi } from "./lib/api/healthApi";
-import type { HealthResponse } from "./lib/api/types";
+import { systemStatusApi } from "./lib/api/systemStatusApi";
+import type { SystemStatusResponse } from "./lib/api/types";
 import "./App.css";
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [status, setStatus] = useState<SystemStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const checkHealth = async () => {
+    const checkSystemStatus = async () => {
       setIsLoading(true);
       setError(null);
 
-      const result = await healthApi.getHealth();
+      const result = await systemStatusApi.getSystemStatus();
       if (result.ok) {
-        setHealth(result.data);
+        setStatus(result.data);
       } else {
-        setHealth(null);
+        setStatus(null);
         setError(result.error);
       }
 
       setIsLoading(false);
     };
 
-    checkHealth();
+    checkSystemStatus();
   }, []);
-
-  const apiMessage = isLoading
-    ? "Mentor AMP API: loading"
-    : error
-      ? `Mentor AMP API: error (${error})`
-      : `Mentor AMP API: ${health?.status ?? "unknown"}`;
 
   return (
     <main className="app-shell">
       <h1>Mentor AMP</h1>
-      <p className="api-status">{apiMessage}</p>
+
+      {isLoading && <p className="status-message">Loading system status...</p>}
+
+      {!isLoading && error && (
+        <p className="status-message error">Unable to load status: {error}</p>
+      )}
+
+      {!isLoading && !error && status && (
+        <section className="status-grid" aria-label="System status">
+          <article className="status-card">
+            <h2>API Status</h2>
+            <p>{status.api.status === "ok" ? "Online" : "Offline"}</p>
+          </article>
+          <article className="status-card">
+            <h2>Database Status</h2>
+            <p>
+              {status.database.status === "connected"
+                ? "Connected"
+                : "Not connected"}
+            </p>
+          </article>
+          <article className="status-card">
+            <h2>App Version</h2>
+            <p>{status.api.version}</p>
+          </article>
+          <article className="status-card">
+            <h2>Environment</h2>
+            <p>{status.app.environment}</p>
+          </article>
+        </section>
+      )}
     </main>
   );
 }

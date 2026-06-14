@@ -7,3 +7,17 @@ export interface HealthResponse {
   app: string;
   version: string;
 }
+
+export interface SystemStatusResponse {
+  api: {
+    status: string;
+    version: string;
+  };
+  app: {
+    name: string;
+    environment: string;
+  };
+  database: {
+    status: string;
+  };
+}

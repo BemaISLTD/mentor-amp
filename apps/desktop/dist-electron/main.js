@@ -1,32 +1,32 @@
-import { ipcMain as l, app as t, BrowserWindow as i } from "electron";
-import { fileURLToPath as h } from "node:url";
-import o from "node:path";
-const a = o.dirname(h(import.meta.url));
-process.env.APP_ROOT = o.join(a, "..");
-const s = process.env.VITE_DEV_SERVER_URL, m = o.join(process.env.APP_ROOT, "dist-electron"), p = o.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = s ? o.join(process.env.APP_ROOT, "public") : p;
-let n;
-function c() {
-  n = new i({
+import { ipcMain as a, app as s, BrowserWindow as i } from "electron";
+import { fileURLToPath as u } from "node:url";
+import n from "node:path";
+const p = n.dirname(u(import.meta.url));
+process.env.APP_ROOT = n.join(p, "..");
+const r = process.env.VITE_DEV_SERVER_URL, v = n.join(process.env.APP_ROOT, "dist-electron"), c = n.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = r ? n.join(process.env.APP_ROOT, "public") : c;
+let t;
+function l() {
+  t = new i({
     title: "Mentor AMP",
-    icon: o.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: n.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      preload: o.join(a, "preload.mjs")
+      preload: n.join(p, "preload.mjs")
     }
-  }), n.webContents.on("did-finish-load", () => {
-    n == null || n.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  }), s ? n.loadURL(s) : n.loadFile(o.join(p, "index.html"));
+  }), t.webContents.on("did-finish-load", () => {
+    t == null || t.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  }), r ? t.loadURL(r) : t.loadFile(n.join(c, "index.html"));
 }
-l.handle("health:check", async () => {
+a.handle("health:check", async () => {
   try {
-    const r = await fetch("http://127.0.0.1:8000/health");
-    if (!r.ok)
+    const o = await fetch("http://127.0.0.1:8000/health");
+    if (!o.ok)
       return {
         status: "unreachable",
         app: "Mentor AMP",
         version: "0.1.0"
       };
-    const e = await r.json();
+    const e = await o.json();
     return {
       status: typeof (e == null ? void 0 : e.status) == "string" ? e.status : "ok",
       app: typeof (e == null ? void 0 : e.app) == "string" ? e.app : "Mentor AMP",
@@ -40,17 +40,49 @@ l.handle("health:check", async () => {
     };
   }
 });
-t.on("window-all-closed", () => {
-  process.platform !== "darwin" && (t.quit(), n = null);
+a.handle("system:status", async () => {
+  try {
+    const o = await fetch("http://127.0.0.1:8000/system/status");
+    return o.ok ? await o.json() : {
+      api: {
+        status: "unreachable",
+        version: "0.1.0"
+      },
+      app: {
+        name: "Mentor AMP",
+        environment: "development"
+      },
+      database: {
+        status: "not_connected"
+      }
+    };
+  } catch {
+    return {
+      api: {
+        status: "unreachable",
+        version: "0.1.0"
+      },
+      app: {
+        name: "Mentor AMP",
+        environment: "development"
+      },
+      database: {
+        status: "not_connected"
+      }
+    };
+  }
 });
-t.on("activate", () => {
-  i.getAllWindows().length === 0 && c();
+s.on("window-all-closed", () => {
+  process.platform !== "darwin" && (s.quit(), t = null);
 });
-t.whenReady().then(() => {
-  t.setName("Mentor AMP"), c();
+s.on("activate", () => {
+  i.getAllWindows().length === 0 && l();
+});
+s.whenReady().then(() => {
+  s.setName("Mentor AMP"), l();
 });
 export {
-  m as MAIN_DIST,
-  p as RENDERER_DIST,
-  s as VITE_DEV_SERVER_URL
+  v as MAIN_DIST,
+  c as RENDERER_DIST,
+  r as VITE_DEV_SERVER_URL
 };
