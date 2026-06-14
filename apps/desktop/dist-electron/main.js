@@ -1,59 +1,56 @@
-import { ipcMain, app, BrowserWindow } from "electron";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-createRequire(import.meta.url);
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path.join(__dirname$1, "..");
-const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
-const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-let win;
-function createWindow() {
-  win = new BrowserWindow({
+import { ipcMain as l, app as t, BrowserWindow as i } from "electron";
+import { fileURLToPath as h } from "node:url";
+import o from "node:path";
+const a = o.dirname(h(import.meta.url));
+process.env.APP_ROOT = o.join(a, "..");
+const s = process.env.VITE_DEV_SERVER_URL, m = o.join(process.env.APP_ROOT, "dist-electron"), p = o.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = s ? o.join(process.env.APP_ROOT, "public") : p;
+let n;
+function c() {
+  n = new i({
     title: "Mentor AMP",
-    icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: o.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs")
+      preload: o.join(a, "preload.mjs")
     }
-  });
-  win.webContents.on("did-finish-load", () => {
-    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  });
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
-  } else {
-    win.loadFile(path.join(RENDERER_DIST, "index.html"));
-  }
+  }), n.webContents.on("did-finish-load", () => {
+    n == null || n.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  }), s ? n.loadURL(s) : n.loadFile(o.join(p, "index.html"));
 }
-ipcMain.handle("health:check", async () => {
+l.handle("health:check", async () => {
   try {
-    const response = await fetch("http://127.0.0.1:8000/health");
-    if (!response.ok) return "unreachable";
-    const data = await response.json();
-    return typeof (data == null ? void 0 : data.status) === "string" ? data.status : "ok";
+    const r = await fetch("http://127.0.0.1:8000/health");
+    if (!r.ok)
+      return {
+        status: "unreachable",
+        app: "Mentor AMP",
+        version: "0.1.0"
+      };
+    const e = await r.json();
+    return {
+      status: typeof (e == null ? void 0 : e.status) == "string" ? e.status : "ok",
+      app: typeof (e == null ? void 0 : e.app) == "string" ? e.app : "Mentor AMP",
+      version: typeof (e == null ? void 0 : e.version) == "string" ? e.version : "0.1.0"
+    };
   } catch {
-    return "unreachable";
+    return {
+      status: "unreachable",
+      app: "Mentor AMP",
+      version: "0.1.0"
+    };
   }
 });
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-    win = null;
-  }
+t.on("window-all-closed", () => {
+  process.platform !== "darwin" && (t.quit(), n = null);
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+t.on("activate", () => {
+  i.getAllWindows().length === 0 && c();
 });
-app.whenReady().then(() => {
-  app.setName("Mentor AMP");
-  createWindow();
+t.whenReady().then(() => {
+  t.setName("Mentor AMP"), c();
 });
 export {
-  MAIN_DIST,
-  RENDERER_DIST,
-  VITE_DEV_SERVER_URL
+  m as MAIN_DIST,
+  p as RENDERER_DIST,
+  s as VITE_DEV_SERVER_URL
 };

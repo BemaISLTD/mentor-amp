@@ -1,9 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // The built directory structure
@@ -53,11 +51,25 @@ function createWindow() {
 ipcMain.handle("health:check", async () => {
   try {
     const response = await fetch("http://127.0.0.1:8000/health");
-    if (!response.ok) return "unreachable";
+    if (!response.ok) {
+      return {
+        status: "unreachable",
+        app: "Mentor AMP",
+        version: "0.1.0",
+      };
+    }
     const data = await response.json();
-    return typeof data?.status === "string" ? data.status : "ok";
+    return {
+      status: typeof data?.status === "string" ? data.status : "ok",
+      app: typeof data?.app === "string" ? data.app : "Mentor AMP",
+      version: typeof data?.version === "string" ? data.version : "0.1.0",
+    };
   } catch {
-    return "unreachable";
+    return {
+      status: "unreachable",
+      app: "Mentor AMP",
+      version: "0.1.0",
+    };
   }
 });
 
