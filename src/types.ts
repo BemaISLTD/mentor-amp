@@ -10,5 +10,26 @@ export type ExecutionStatus = 'Completed' | 'Running' | 'Paused' | 'Cancelled' |
 
 export type Model = { name: string; version: string; basis: string; product: string; status: ModelStatus; updated: string; owner: string; runs: number }
 export type RunRecord = { name: string; scenario: string; date: string; modified: string }
+export type RunSetRun = {
+  id: string
+  projectionSetId: string
+  projectionSetName: string
+  scenarioId: string
+  scenarioName: string
+  status: 'Queued' | 'Running' | 'Completed' | 'Failed'
+  progress: { total: number; done: number; percent: number; unit: 'policies'; eta_seconds?: number }
+  events: { id: number; timestamp: string; level: 'info' | 'warning' | 'error'; step: string; message: string }[]
+}
+export type RunSetRecord = {
+  id: string
+  projectId: string
+  name: string
+  notes: string | null
+  submittedAt: string
+  status: 'Queued' | 'Running' | 'Completed' | 'Failed'
+  projectionSetIds: string[]
+  scenarioIds: string[]
+  runs: RunSetRun[]
+}
 export type Investigation = { title: string; model: string; scenario: string; period: string; time: string }
 export type ActionButtonProps = { onAction?: () => void; actionIcon?: ReactNode }

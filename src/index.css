@@ -1,9 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
+@layer components {
 :root { font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif; color: #0d1831; background: #f6f8f8; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 1120px; }
+body { margin: 0; min-width: 0; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 
@@ -98,3 +99,4 @@ html, body, #root, .app-shell { overflow-x: hidden; }
 .metric-card-button { width:100%; border:0; cursor:pointer; font:inherit; text-align:left; }
 .metric-card-button .metric-label, .metric-card-button strong, .metric-card-button small { text-align:left; }
 .metric-card-button:hover { transform:translateY(-1px); }
+}

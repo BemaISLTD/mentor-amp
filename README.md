@@ -1,97 +1,41 @@
-# MentorAmp Frontend
-
-A production-quality frontend for a simplified actuarial projection platform, inspired by enterprise systems like ALFA and Prophet. Built with a modern React stack and fully functional without a real backend.
-
+---
+title: MentorAmp Dashboard
+emoji: 📊
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
 ---
 
-## Tech Stack
+# React + TypeScript + Vite
 
-| Layer | Technology |
-|---|---|
-| Build | Vite 8 |
-| UI Framework | React 19 + TypeScript |
-| Styling | Tailwind CSS v4 |
-| Component Library | shadcn/ui (custom-built primitives) + Radix UI |
-| Data Tables | TanStack Table v8 |
-| Routing | React Router v7 |
-| Forms | React Hook Form + Zod |
-| Charts | Recharts |
-| Icons | Lucide React |
-| Mock API | Custom in-memory service (src/lib/api.ts) |
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
----
+Currently, two official plugins are available:
 
-## Quick Start
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-    npm install
-    npm run dev
-    # Open http://localhost:5173
+## React Compiler
 
-### Build for Production
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-    npm run build
-    npm run preview
+## Expanding the Oxlint configuration
 
----
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
 
-## Project Structure
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+```
 
-    src/
-    ├── components/
-    │   ├── data-table/       # TanStack Table wrapper
-    │   ├── layout/           # AppLayout, Sidebar, Header, PageHeader
-    │   ├── status/           # FileStatusBadge, RunStatusBadge
-    │   ├── ui/               # All shadcn-compatible UI primitives
-    │   └── upload/           # Drag-and-drop FileUploadZone
-    ├── hooks/
-    │   └── useTheme.tsx      # Light/dark mode context
-    ├── lib/
-    │   ├── api.ts            # Mock API service (replace for real backend)
-    │   ├── mock-data.ts      # All mock data (realistic actuarial data)
-    │   ├── types.ts          # TypeScript type definitions
-    │   └── utils.ts          # Formatting utilities
-    ├── pages/
-    │   ├── dashboard/
-    │   ├── data/
-    │   ├── products/
-    │   ├── reports/
-    │   ├── runs/
-    │   └── settings/
-    └── routes/
-        └── index.tsx
-
----
-
-## Mock Backend
-
-src/lib/mock-data.ts contains all static mock data.
-src/lib/api.ts simulates async API calls with realistic delays.
-
-Every function in api.ts has an INTEGRATION NOTE comment showing the
-target REST endpoint. To connect a real backend, replace the function body:
-
-    // BEFORE (mock)
-    export async function getRuns() {
-      await sleep(500);
-      return _runs;
-    }
-
-    // AFTER (real backend)
-    export async function getRuns() {
-      const res = await fetch('/api/v1/runs', { headers: authHeaders() });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
-    }
-
----
-
-## Status Badges
-
-File: pending | uploaded | validating | validated | failed
-Run:  draft | queued | running | completed | failed | cancelled
-
----
-
-## Dark Mode
-
-Toggle via the moon/sun icon in the header. Persisted to localStorage.
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.

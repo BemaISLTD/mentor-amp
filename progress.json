@@ -1,0 +1,360 @@
+{
+  "project": "Mentor AMP Volt frontend",
+  "space": "Samfredoly/jor",
+  "lastUpdated": "2026-09-28T19:19:45Z",
+  "currentMilestone": "dashboard-navigation-complete",
+  "milestones": [
+    {
+      "id": "foundation",
+      "status": "complete",
+      "commit": "115273e"
+    },
+    {
+      "id": "core-authoring",
+      "status": "complete",
+      "commit": "fb9b981"
+    },
+    {
+      "id": "execution-analysis",
+      "status": "complete",
+      "commit": "6639c9a"
+    },
+    {
+      "id": "sidebar-reference-fix",
+      "status": "complete",
+      "commit": "4c8a1b8"
+    },
+    {
+      "id": "react-architecture-refactor",
+      "status": "complete",
+      "commit": "6e631f3"
+    },
+    {
+      "id": "model-library-reference-screen",
+      "status": "complete",
+      "commit": "daae670"
+    },
+    {
+      "id": "zip-screen-audit-and-workflow-closure",
+      "status": "complete",
+      "commit": null,
+      "source": "mentoramp-volt-unified.zip",
+      "audit": {
+        "boardsReviewed": [
+          "01-model-architecture-workspace",
+          "24-input-library-import-validation",
+          "25-assumption-factor-table-editor",
+          "26-projection-set-library-validation",
+          "27-run-set-monitor-recovery",
+          "28-results-comparison-variance",
+          "29-formula-group-detail-reuse-map",
+          "30-report-library-definition-preview",
+          "32-scratchpad-notebook-blocks",
+          "33-mentor-history-workspace-corrected",
+          "34-ten-required-prototype-journeys",
+          "35-corrected-state-and-terminology-matrix"
+        ],
+        "bossAuditReviewed": true,
+        "canonicalNavigation": [
+          "Dashboard",
+          "Models",
+          "Inputs",
+          "Scenarios",
+          "Formulas",
+          "Projections",
+          "Runs",
+          "Results",
+          "Reports",
+          "Investigate",
+          "Mentor",
+          "Admin / Settings"
+        ]
+      },
+      "implemented": [
+        "Inputs now has dedicated Input Library, Liability Inforce, Asset Inforce, Assumption Tables, Factor Tables, Projection Inputs, and Validation Center subviews.",
+        "Runs now has Run Set Library, create/edit, Execution Monitor, immutable snapshot preflight, progress jobs, and failure/retry recovery states.",
+        "Results now has Results Explorer, Run History, two-run comparison, changed-dimensions view, and Driver / Variance contribution chart.",
+        "Reports now has Report Library, Report Definition / Preview, Run Set attachment, Completed Reports, and PDF/CSV export actions.",
+        "Mentor now has a stable top-level Contextual Mentor workspace and dedicated Mentor History workspace with verified facts, citations, guardrails, and proposed next steps.",
+        "Projections now has Projection Set Library, Create / Edit, validation, projection characteristics, input compatibility, output capture, and Run Set handoff direction.",
+        "Dashboard Quick Actions now navigate to the correct top-level workspaces instead of only showing notifications.",
+        "WorkspaceToolbar supports real action callbacks for nested workflow transitions."
+      ],
+      "remainingNextBatch": [
+        "Scenario Set Detail and Generator Editor",
+        "Generated Batch and Scenario Comparison",
+        "Trace branching/checkpoints",
+        "Scratchpad notebook blocks and provenance refresh/freeze",
+        "Cross-model Output Mapping and Run Linkage"
+      ]
+    },
+    {
+      "id": "model-workspace-and-formula-intelligence",
+      "status": "complete",
+      "commit": "537524e",
+      "implemented": [
+        "Models Open model now enters a real Model Workspace hierarchy.",
+        "Model Workspace exposes domain/product, block/profile/basis, formula groups, inputs, and published outputs.",
+        "Block/Profile/Basis detail shows shared, inherited, and overridden formula composition.",
+        "Published Outputs interface shows variable type, dimensions, consumers, and contract validation.",
+        "Formula Groups now have nested Formula Detail / Editor, Inheritance Map, Override Compare, and New Block/Profile wizard states.",
+        "Formula detail exposes expression, readable explanation, inputs, dependencies, dependents, provenance, tests, trace, and comparison actions.",
+        "Override comparison exposes restore, rebase, and fork actions."
+      ],
+      "verifiedJourneys": [
+        "Models \u2192 Open model \u2192 Model Workspace",
+        "Model Workspace \u2192 Published Outputs",
+        "Formulas \u2192 Formula Detail",
+        "Formula Detail \u2192 Inheritance Map \u2192 Override Compare"
+      ],
+      "remainingNextBatch": [
+        "Scenario Set Detail and Generator Editor",
+        "Generated Batch and Scenario Comparison",
+        "Trace branching/checkpoints",
+        "Scratchpad notebook blocks and provenance refresh/freeze",
+        "Cross-model Output Mapping and Run Linkage"
+      ]
+    },
+    {
+      "id": "scenario-trace-scratchpad-cross-model",
+      "status": "complete",
+      "commit": null,
+      "implemented": [
+        "Scenario Set Detail",
+        "Scenario Generator Library and Editor",
+        "Generated Batch detail",
+        "Attach Scenario to Projection compatibility flow",
+        "Scenario Comparison",
+        "Trace Explorer backward/forward paths",
+        "Trace branch selection and pinned checkpoints",
+        "Saved Investigation restore entry",
+        "Scratchpad notebook linked values, tables, charts, formulas, notes, Mentor blocks, provenance, freeze, compare, promote, discard",
+        "Output Mapping compatibility contract",
+        "Run Linkage provenance",
+        "Cross-model Trace"
+      ],
+      "verifiedJourneys": [
+        "Scenarios \u2192 Generator Library \u2192 Editor \u2192 Generated Batch \u2192 Attach",
+        "Investigate \u2192 Trace Explorer \u2192 Pin checkpoint",
+        "Investigate \u2192 Scratchpad \u2192 Freeze snapshot",
+        "Model Workspace \u2192 Published Outputs \u2192 Output Mapping \u2192 Cross-model Trace"
+      ],
+      "remainingNextBatch": [
+        "Replace remaining notification-only actions with nested transitions",
+        "Run final ten prototype journeys",
+        "State and responsive QA"
+      ]
+    },
+    {
+      "id": "boss-spec-frontend-complete",
+      "status": "complete",
+      "commit": "ddcb727",
+      "implemented": [
+        "All canonical top-level routes",
+        "All required frontend-only workflow screens",
+        "Scenario, Trace, Scratchpad, Cross-model, and Settings completion",
+        "Final production build and zero-warning lint"
+      ],
+      "verifiedJourneys": [
+        "Model Library \u2192 Model Workspace \u2192 Published Outputs \u2192 Output Mapping \u2192 Cross-model Trace",
+        "Formula Groups \u2192 Formula Detail \u2192 Inheritance Map \u2192 Override Compare",
+        "Scenarios \u2192 Generator Library \u2192 Generator Editor \u2192 Generated Batch \u2192 Attach",
+        "Investigate \u2192 Trace Explorer \u2192 Saved Investigations \u2192 Scratchpad",
+        "Runs \u2192 Monitor \u2192 Recovery",
+        "Results \u2192 Compare \u2192 Variance",
+        "Reports \u2192 Definition \u2192 Attachment \u2192 Completed Report"
+      ],
+      "remainingNextBatch": [
+        "Backend persistence and real compute integrations, if later authorized"
+      ]
+    },
+    {
+      "id": "mock-functionality-workflows-complete",
+      "status": "complete",
+      "implemented": [
+        "Interactive Mentor chat box with mock evidence-backed responses",
+        "Results Explorer Trace this value \u2192 Trace Explorer",
+        "Results Explorer Add to Scratchpad \u2192 Scratchpad context",
+        "Investigate Compare with another run \u2192 selectable mock run pair",
+        "Investigate Ask Mentor about this branch \u2192 Mentor workspace",
+        "Run monitor pause/resume/cancel/log drawer/recovery transitions",
+        "Validation Center issue rows \u2192 targeted input detail views",
+        "Shared workspace mock search submit and filter/view state feedback",
+        "Typed investigation intent handoff through AppContext"
+      ],
+      "verified": [
+        "Browser: Results Trace this value opened Investigate Trace Explorer",
+        "Browser: Investigate Compare with another run opened selectable run list",
+        "Browser: Investigate Ask Mentor opened Mentor workspace",
+        "Browser: Mentor message submitted and mock response with citations rendered",
+        "Build passed",
+        "Lint passed with zero warnings and errors"
+      ],
+      "remaining": [
+        "Persist mock search/filter selections into collection-level filtering across every library",
+        "Real file downloads and backend persistence when backend scope is authorized"
+      ]
+    },
+    {
+      "id": "dashboard-navigation-complete",
+      "status": "complete",
+      "implemented": [
+        "Active models metric \u2192 Models",
+        "Runs this week metric \u2192 Runs",
+        "Investigations metric \u2192 Investigate",
+        "Net reserve metric \u2192 Results",
+        "Continue investigation hero \u2192 Trace Explorer",
+        "Investigation panel Open/Resume/Trace \u2192 Trace Explorer",
+        "Recent projection runs View all \u2192 Runs",
+        "Recent projection run rows \u2192 Results",
+        "Recent investigations View all \u2192 Investigate",
+        "Recent investigation rows \u2192 Trace Explorer",
+        "Quick actions \u2192 Models, Projections, Trace Explorer, Scratchpad"
+      ],
+      "verified": [
+        "Browser Active models metric opened Model Library",
+        "Build passed",
+        "Lint passed with zero warnings and errors"
+      ]
+    }
+  ],
+  "structure": {
+    "compositionRoot": "src/App.tsx",
+    "layout": "src/components/layout",
+    "sharedUi": "src/components/ui",
+    "pages": [
+      "src/pages/ModelsPage.tsx",
+      "src/pages/InputScreens.tsx",
+      "src/pages/ProjectionScreens.tsx",
+      "src/pages/ExecutionScreens.tsx",
+      "src/pages/ResultScreens.tsx",
+      "src/pages/ReportScreens.tsx",
+      "src/pages/MentorScreens.tsx"
+    ],
+    "context": "src/context",
+    "fixtures": "src/data/fixtures.ts",
+    "types": "src/types.ts"
+  },
+  "qa": {
+    "build": "passed",
+    "lint": "passed with zero warnings",
+    "runtime": "local preview rendered and final workflow smoke tests passed",
+    "verifiedJourneys": [
+      "Inputs \u2192 Liability Inforce detail",
+      "Runs \u2192 Execution Monitor \u2192 Recovery",
+      "Results \u2192 Compare runs \u2192 Driver / Variance",
+      "Reports \u2192 Definition / Preview \u2192 Run Set attachment \u2192 Completed Report",
+      "Mentor \u2192 Mentor History",
+      "Projections \u2192 Projection Set Validation"
+    ]
+  },
+  "architectureNotes": [
+    "Projection Set and Run Set remain distinct objects and destinations before execution.",
+    "Nested screen state is local to each feature module; active top-level navigation remains in AppContext.",
+    "No backend, compute, export service, or Figma integration was added; actions are frontend-only and preserve the design workflow boundaries.",
+    "Supplied ZIP boards and the boss audit remain the source of truth for the next implementation batch.",
+    "Frontend-only boss-spec completion checkpoint; backend persistence, compute, and real export integrations remain intentionally outside scope."
+  ],
+  "bossSpecAudit": {
+    "source": "/home/ubuntu/work/hf-jor/spec/design-spec.docx",
+    "sourceUrl": "https://tmpfiles.org/wEAmw4L7lvvi/mentor_amp_sam_next_stage_ui_ux_design_specification1.docx",
+    "report": "BOSS_SPEC_SCREEN_NAV_AUDIT.md",
+    "currentCommit": "ddcb727",
+    "status": "frontend-spec-complete",
+    "implementedNow": [
+      "Dashboard",
+      "Model Library reference",
+      "Inputs detail and validation",
+      "Projection Set Library/Edit/Validation",
+      "Run Set Library/Edit/Monitor/Recovery",
+      "Results Explorer/History/Compare/Variance",
+      "Reports Library/Definition/Attachment/Completed",
+      "Contextual Mentor/Mentor History",
+      "Scenario Set Detail and Generator architecture",
+      "Generated Batch and Scenario Comparison",
+      "Trace Explorer with branches and checkpoints",
+      "Scratchpad analytical notebook",
+      "Output Mapping and Cross-model Trace",
+      "Admin / Settings workspace"
+    ],
+    "partial": [
+      "Model Library actions",
+      "Formula Groups Library/Detail",
+      "Scenario Library/Detail",
+      "Mappings",
+      "Run Detail/Export Center",
+      "Trace Explorer/Saved Investigations",
+      "Mentor contextual actions"
+    ],
+    "missingNow": [],
+    "nextImplementationOrder": []
+  },
+  "functionalityAudit": {
+    "report": "FUNCTIONALITY_IDLE_LINKS_AUDIT.md",
+    "commitAudited": "0c77930",
+    "metrics": {
+      "buttonElements": 247,
+      "notifyCalls": 93,
+      "anchorElements": 0,
+      "hrefAttributes": 0
+    },
+    "status": "mock-workflows-wired",
+    "p0Findings": 5,
+    "p1Findings": 8,
+    "p2Findings": 6,
+    "nextImplementationOrder": [
+      "Typed navigation context and deep links",
+      "Replace P0 notification-only actions",
+      "Shared search/filter/sort/view state",
+      "Run control state machine and Run Set detail",
+      "Validation issue target routing",
+      "Prototype persistence and real downloads",
+      "Remove legacy modules and add route coverage tests",
+      "Accessibility and responsive QA"
+    ],
+    "implementedNow": [
+      "Interactive Mentor chat box with mock evidence-backed responses",
+      "Results Explorer Trace this value \u2192 Trace Explorer",
+      "Results Explorer Add to Scratchpad \u2192 Scratchpad context",
+      "Investigate Compare with another run \u2192 selectable mock run pair",
+      "Investigate Ask Mentor about this branch \u2192 Mentor workspace",
+      "Run monitor pause/resume/cancel/log drawer/recovery transitions",
+      "Validation Center issue rows \u2192 targeted input detail views",
+      "Shared workspace mock search submit and filter/view state feedback",
+      "Typed investigation intent handoff through AppContext"
+    ],
+    "verifiedNow": [
+      "Browser: Results Trace this value opened Investigate Trace Explorer",
+      "Browser: Investigate Compare with another run opened selectable run list",
+      "Browser: Investigate Ask Mentor opened Mentor workspace",
+      "Browser: Mentor message submitted and mock response with citations rendered",
+      "Build passed",
+      "Lint passed with zero warnings and errors"
+    ],
+    "remainingNextImplementation": [
+      "Persist mock search/filter selections into collection-level filtering across every library",
+      "Real file downloads and backend persistence when backend scope is authorized"
+    ],
+    "dashboardNavigation": {
+      "status": "complete",
+      "implemented": [
+        "Active models metric \u2192 Models",
+        "Runs this week metric \u2192 Runs",
+        "Investigations metric \u2192 Investigate",
+        "Net reserve metric \u2192 Results",
+        "Continue investigation hero \u2192 Trace Explorer",
+        "Investigation panel Open/Resume/Trace \u2192 Trace Explorer",
+        "Recent projection runs View all \u2192 Runs",
+        "Recent projection run rows \u2192 Results",
+        "Recent investigations View all \u2192 Investigate",
+        "Recent investigation rows \u2192 Trace Explorer",
+        "Quick actions \u2192 Models, Projections, Trace Explorer, Scratchpad"
+      ],
+      "verified": [
+        "Browser Active models metric opened Model Library",
+        "Build passed",
+        "Lint passed with zero warnings and errors"
+      ]
+    }
+  }
+}

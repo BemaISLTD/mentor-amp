@@ -1,0 +1,110 @@
+@layer components {
+.dashboard-search-button {
+  min-width: 92px;
+  justify-content: space-between;
+  padding: 11px 15px;
+  font-size: 12px;
+}
+
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-page .metric-grid {
+  gap: 11px;
+}
+
+.dashboard-page .dashboard-grid {
+  gap: 12px;
+  margin-top: 0;
+}
+
+.dashboard-page .panel {
+  padding: 16px;
+}
+
+.dashboard-page .investigation-panel {
+  padding: 16px;
+}
+
+.dashboard-run-table {
+  margin-top: 22px;
+}
+
+.dashboard-run-head,
+.dashboard-run-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.3fr 0.9fr 0.9fr 1.2fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.dashboard-run-head {
+  min-height: 38px;
+  border-bottom: 1px solid #e4e9eb;
+  color: #8190a1;
+  font-size: 9px;
+}
+
+.dashboard-run-row {
+  width: 100%;
+  min-height: 53px;
+  border: 0;
+  border-bottom: 1px solid #e4e9eb;
+  padding: 0;
+  background: transparent;
+  color: #78889c;
+  font-size: 9px;
+  text-align: left;
+}
+
+.dashboard-run-row:last-child {
+  border-bottom: 0;
+}
+
+.dashboard-run-row:hover,
+.dashboard-run-row:focus-visible {
+  background: #f7faef;
+}
+
+.dashboard-run-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: #0d1831;
+}
+
+.dashboard-run-name svg {
+  flex: 0 0 auto;
+}
+
+.dashboard-run-name b {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-run-scenario,
+.dashboard-run-date,
+.dashboard-run-modified {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-run-status .status-badge {
+  white-space: nowrap;
+}
+
+.recent-investigations-panel {
+  min-height: 350px;
+}
+
+.recent-investigations-list {
+  margin-top: 16px;
+}
+}
