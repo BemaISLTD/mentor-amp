@@ -18,6 +18,7 @@ import { ProjectionSetupProgress } from './pages/projection-setup-progress/Proje
 import { RunSetWorkflow } from './pages/run-set-workflow/RunSetWorkflow'
 import { MentorWorkspace } from './pages/mentor-workspace/MentorWorkspace'
 import { AdminSettings } from './pages/admin-settings/AdminSettings'
+import { ScreenErrorBoundary } from './components/ui/ScreenErrorBoundary'
 import type { Model } from './types'
 import { useState } from 'react'
 import { ApiProvider } from './api/ApiProvider'
@@ -113,6 +114,7 @@ function RoutedApp() {
       actions={isModelWorkspace ? <ModelWorkspaceActions onValidate={() => notify('Model validation started')} onCreate={startProjectionSetup} /> : activeScreen === 'Inputs' ? <InputTrustSignal /> : activeScreen === 'Investigate' && !investigationSelectorActive ? investigationActions : activeScreen === 'Dashboard' || activeScreen === 'Results' || activeScreen === 'Projections' || activeScreen === 'Reports' ? actions : undefined}
       workflowPanel={projectionSetupActive ? <ProjectionSetupProgress onNavigateToInput={openInputWorkflow} onNavigateToScenario={openScenarioLibrary} onReturnToSetup={startProjectionSetup} onClose={endProjectionSetup} /> : undefined}
     >
+      <ScreenErrorBoundary key={activeScreen}>
       {activeScreen === 'Dashboard' ? (
         <Dashboard />
       ) : activeScreen === 'Models' ? (
@@ -160,6 +162,7 @@ function RoutedApp() {
           <p className="muted">Page content has been removed.</p>
         </section>
       )}
+      </ScreenErrorBoundary>
     </AppShell>
   )
 }

@@ -1,41 +1,23 @@
----
-title: MentorAmp Dashboard
-emoji: 📊
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-app_port: 7860
----
+# MentorAMP Frontend
 
-# React + TypeScript + Vite
+## Run locally
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+1. Install dependencies:
 
-Currently, two official plugins are available:
+   ```sh
+   pnpm install
+   ```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+2. Create `.env.local` in the project root and set the backend API URL:
 
-## React Compiler
+   ```env
+   VITE_API_BASE_URL=http://localhost:8001
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+   Use the URL for the backend instance you want the frontend to connect to.
 
-## Expanding the Oxlint configuration
+3. Start the development server:
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+   ```sh
+   pnpm dev
+   ```

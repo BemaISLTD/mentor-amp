@@ -2,7 +2,7 @@ import { createContext } from 'react'
 import type { ScreenName } from '../types'
 import type { Model, RunSetRecord } from '../types'
 
-export type InvestigationIntent = { kind: 'trace' | 'compare' | 'mentor' | 'scratchpad'; runId?: string; metric?: string; policyId?: string; month?: number; question?: string } | null
+export type InvestigationIntent = { kind: 'trace' | 'compare' | 'mentor' | 'scratchpad'; runId?: string; metric?: string; question?: string } | null
 export type ProjectionInputs = {
   model: Model | null
   inforce: { id: string; name: string; fingerprint: string; status: string; mappedColumns: number; requiredColumns: number; projectId?: string } | null

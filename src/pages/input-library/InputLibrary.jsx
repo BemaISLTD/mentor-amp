@@ -22,79 +22,7 @@ import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
 import './input-library.css'
 
-const inputRecords = [
-  {
-    name: 'Liability Inforce',
-    detail: 'MYGA liability file',
-    version: 'v2026.12',
-    scope: 'Insurance cash flows',
-    records: '1,250 policies',
-    status: 'Validated',
-    updated: 'Dec 31, 2026',
-    description: 'Active MYGA liability data including premium, benefit fields, and key policy attributes.',
-    category: 'Liability Inforce',
-    calculations: 12,
-    metrics: 3,
-    runs: 2,
-  },
-  {
-    name: 'Asset Inforce',
-    detail: 'Asset portfolio file',
-    version: 'v2026.12',
-    scope: 'Asset cash flows',
-    records: '8,400 records',
-    status: 'Validated',
-    updated: 'Dec 31, 2026',
-    description: 'Current asset portfolio positions mapped to the MYGA block and projection basis.',
-    category: 'Asset Inforce',
-    calculations: 8,
-    metrics: 2,
-    runs: 2,
-  },
-  {
-    name: 'Assumption Tables',
-    detail: 'Mortality, lapse and expenses',
-    version: 'v1.8',
-    scope: 'Assumptions',
-    records: '12 tables',
-    status: 'Validated',
-    updated: 'Dec 31, 2026',
-    description: 'Versioned mortality, lapse, and expense assumptions used by the active model.',
-    category: 'Assumption Tables',
-    calculations: 6,
-    metrics: 4,
-    runs: 3,
-  },
-  {
-    name: 'Factor Tables',
-    detail: 'Mortality & economic factors',
-    version: 'v1.4',
-    scope: 'Economic factors',
-    records: '42 factors',
-    status: 'Needs review',
-    updated: 'Dec 29, 2026',
-    description: 'Reference factor set with two cells outside the expected calibration range.',
-    category: 'Factor Tables',
-    calculations: 4,
-    metrics: 2,
-    runs: 1,
-  },
-  {
-    name: 'Projection Inputs',
-    detail: 'Global model controls',
-    version: 'v2026.12',
-    scope: 'Run Controls',
-    records: '26 fields',
-    status: 'Validated',
-    updated: 'Dec 31, 2026',
-    description: 'Global projection controls, run dates, horizon, and trace capture settings.',
-    category: 'Projection Inputs',
-    calculations: 12,
-    metrics: 3,
-    runs: 2,
-  },
-]
-
+const EMPTY_INPUTS = []
 const inputTabs = [
   'Input Library',
   'Mappings',
@@ -110,7 +38,7 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
   const { projectId } = useWorkspace()
   const inputsQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/inputs` : null)
   const issuesQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/validation-issues` : null)
-  const apiInputs = inputsQuery.data?.inputs ?? []
+  const apiInputs = inputsQuery.data?.inputs ?? EMPTY_INPUTS
   const inputRecords = useMemo(() => apiInputs.map((item) => {
     const updated = item.updated_at ? new Date(item.updated_at) : null
     return {
@@ -135,7 +63,7 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
   const readiness = inputSummary.total ? Math.round(inputSummary.validated / inputSummary.total * 100) : 0
   const emptyCategories = (inputsQuery.data?.categories ?? []).filter((item) => item.count === 0).length
   const [activeTab, setActiveTab] = useState('Input Library')
-  const [selectedName, setSelectedName] = useState('Liability Inforce')
+  const [selectedId, setSelectedId] = useState('')
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All statuses')
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -159,7 +87,7 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
     })
   }, [activeTab, query, statusFilter, inputRecords])
 
-  const selectedInput = inputRecords.find((record) => record.name === selectedName) ?? inputRecords[0]
+  const selectedInput = inputRecords.find((record) => record.id === selectedId) ?? inputRecords[0]
 
   const selectTab = (tab) => {
     if (tab === 'Assumption Tables' || tab === 'Factor Tables') {
@@ -172,7 +100,7 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
     }
     setActiveTab(tab)
     const nextRecord = inputRecords.find((record) => tab === 'Input Library' || tab === 'Mappings' || tab === 'Validation Center' || record.category === tab)
-    if (nextRecord) setSelectedName(nextRecord.name)
+    if (nextRecord) setSelectedId(nextRecord.id)
   }
 
   return (
@@ -253,11 +181,11 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
             {view === 'list' && <InputTableHeader />}
             {inputsQuery.loading ? <p className="p-6 text-center text-sm text-[#71809f]">Loading project inputs…</p> : inputsQuery.error ? <p className="p-6 text-center text-sm text-[#71809f]">Could not load inputs: {inputsQuery.error.message}</p> : visibleRecords.length ? visibleRecords.map((record) => (
               <InputRow
-                key={record.name}
+                key={record.id}
                 record={record}
-                selected={selectedInput.name === record.name}
+                selected={selectedInput.id === record.id}
                 view={view}
-                onSelect={() => setSelectedName(record.name)}
+                onSelect={() => setSelectedId(record.id)}
               />
             )) : (
               <p className="p-6 text-center text-sm text-[#71809f]">No inputs match the current search and filters.</p>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   ArrowDown,
   ArrowLeft,
@@ -34,33 +34,6 @@ import './results-explorer.css'
 
 const resultTabs = ['Results Explorer', 'Run History', 'Compare runs', 'Driver / Variance']
 
-const projectionYears = [
-  { year: '2026', value: '$1,245.6M' },
-  { year: '2028', value: '$1,348.2M' },
-  { year: '2030', value: '$1,452.7M' },
-  { year: '2032', value: '$1,559.8M' },
-  { year: '2034', value: '$1,663.2M' },
-  { year: '2036', value: '$1,745.1M' },
-  { year: '2038', value: '$1,812.6M' },
-  { year: '2040', value: '$1,866.4M' },
-  { year: '2042', value: '$1,901.8M' },
-  { year: '2044', value: '$1,930.4M' },
-]
-
-const runHistory = [
-  ['JR-20261231-001', 'GAAP Reserve Pack', 'MYGA Base', '2026-12-31', 'Completed'],
-  ['JR-20261230-004', 'Monthly VM-21 Pack', 'VM-21 Deterministic', '2026-12-31', 'Completed'],
-  ['JR-20261228-002', 'Pricing Sensitivity Pack', 'Low Interest Rate', '2026-12-31', 'Stale'],
-  ['JR-20261227-006', 'GAAP Reserve Pack', 'High lapse stress', '2026-12-31', 'Completed'],
-]
-
-const impacts = [
-  { label: 'Mortality', amount: '+$152.3M', type: 'positive', height: '70%' },
-  { label: 'Interest', amount: '+$87.6M', type: 'positive', height: '48%' },
-  { label: 'Lapse', amount: '−$54.1M', type: 'negative', height: '30%' },
-  { label: 'Expense', amount: '−$104.4M', type: 'negative', height: '52%' },
-]
-
 export function ResultsExplorer({ onNotify, onCompareChange }) {
   const { projectId } = useWorkspace()
   const { baseUrl, token } = useApi()
@@ -71,21 +44,18 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
   const [currentId, setCurrentId] = useState('')
   const runsQuery = useApiQuery(`/v1/runs?project_id=${encodeURIComponent(projectId ?? '')}&limit=100`, 5000)
   const runs = runsQuery.data?.runs ?? []
-  const selectedRun = runs.find((run) => run.id === runId) ?? runs[0]
-  const baselineRun = runs.find((run) => run.id === baselineId)
-  const currentRun = runs.find((run) => run.id === currentId)
+  const runsWithResults = runs.filter((run) => run.results_available)
+  const selectedRun = runsWithResults.find((run) => run.id === runId) ?? runsWithResults[0]
+  const baselineRun = runsWithResults.find((run) => run.id === baselineId) ?? runsWithResults[1] ?? runsWithResults[0]
+  const currentRun = runsWithResults.find((run) => run.id === currentId) ?? runsWithResults[0]
+  const selectedBaselineId = baselineRun?.id ?? ''
+  const selectedCurrentId = currentRun?.id ?? ''
   const summaryQuery = useApiQuery(selectedRun ? `/v1/runs/${selectedRun.id}/summary` : null, 5000)
   const aggregateQuery = useApiQuery(selectedRun ? `/v1/runs/${selectedRun.id}/aggregates?group_by=projection_year` : null, 5000)
-  const comparisonQuery = useApiQuery(baselineId && currentId && baselineId !== currentId ? `/v1/comparisons?baseline_run_id=${encodeURIComponent(baselineId)}&current_run_id=${encodeURIComponent(currentId)}` : null)
+  const comparisonQuery = useApiQuery(selectedBaselineId && selectedCurrentId && selectedBaselineId !== selectedCurrentId ? `/v1/comparisons?baseline_run_id=${encodeURIComponent(selectedBaselineId)}&current_run_id=${encodeURIComponent(selectedCurrentId)}` : null)
   const summary = summaryQuery.data
   const aggregate = aggregateQuery.data
   const comparison = comparisonQuery.data
-
-  useEffect(() => {
-    if (!runs.some((run) => run.id === runId) && runs[0]) setRunId(runs[0].id)
-    if (runs.length && !baselineId) setBaselineId(runs[1]?.id ?? runs[0].id)
-    if (runs.length && !currentId) setCurrentId(runs[0].id)
-  }, [runs, runId, baselineId, currentId])
 
   const changeView = (nextView) => {
     const resolvedView = nextView === 'Compare runs' ? 'Compare setup' : nextView
@@ -125,19 +95,20 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
         </div>
         <div className="flex items-center gap-2">
           <label className="sr-only" htmlFor="results-run-select">Select run</label>
-          <select id="results-run-select" aria-label="Select run" value={selectedRun?.id ?? ''} disabled={!runs.length} onChange={(event) => setRunId(event.target.value)}>
-            {!runs.length && <option value="">No runs available</option>}
-            {runs.map((run) => <option key={run.id} value={run.id}>{run.name} · {statusText(run.status)}</option>)}
+          <select id="results-run-select" aria-label="Select run" value={selectedRun?.id ?? ''} disabled={!runsWithResults.length} onChange={(event) => setRunId(event.target.value)}>
+            {!runsWithResults.length && <option value="">No runs with results</option>}
+            {runsWithResults.map((run) => <option key={run.id} value={run.id}>{run.name} · {statusText(run.status)}</option>)}
           </select>
           <button className="results-compare-top button button-primary max-[760px]:w-full" onClick={() => changeView('Compare runs')}><GitCompareArrows size={17} />Compare runs</button>
         </div>
       </nav>
 
-      {(runsQuery.loading || runsQuery.error || (!runsQuery.loading && !runsQuery.error && !runs.length)) && (
+      {(runsQuery.loading || runsQuery.error || (!runsQuery.loading && !runsWithResults.length)) && (
         <section className="result-panel rounded-[10px] bg-white p-4" role={runsQuery.error ? 'alert' : undefined}>
           {runsQuery.loading && 'Loading live runs…'}
           {runsQuery.error && `Could not load runs: ${runsQuery.error.message}`}
           {!runsQuery.loading && !runsQuery.error && !runs.length && 'No runs are available for this project yet. Results, comparisons, and exports will appear when backend runs are available.'}
+          {!runsQuery.loading && !runsQuery.error && runs.length > 0 && !runsWithResults.length && 'Runs are available, but none has result data yet. Results, comparisons, and exports will appear after a run produces results.'}
         </section>
       )}
 
@@ -153,11 +124,11 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
           {view === 'Run History' && <RunHistoryView runs={runs} loading={runsQuery.loading} onSelect={(run) => { setRunId(run.id); setView('Results Explorer') }} scenarioName={scenarioName} statusText={statusText} onNotify={onNotify} />}
           {view === 'Compare setup' && (
             <CompareRunsSetup
-              runs={runs}
+              runs={runsWithResults}
               baselineRun={baselineRun}
               currentRun={currentRun}
-              baselineId={baselineId}
-              currentId={currentId}
+              baselineId={selectedBaselineId}
+              currentId={selectedCurrentId}
               onBaselineChange={setBaselineId}
               onCurrentChange={setCurrentId}
               comparison={comparison}
@@ -403,7 +374,7 @@ function RunHistoryView({ runs, loading, onSelect, scenarioName, statusText, onN
   return (
     <section className="result-panel rounded-[10px] bg-white p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">Run History</h2><p className="text-sm text-[#71809f]">Results remain linked to their model and execution snapshots.</p></div><button className="result-action" onClick={() => onNotify('Run-history filtering is not available yet.') }><Search size={16} />Filter runs</button></div>
-      <div className="flex flex-col">{loading && <p className="py-4">Loading backend run history…</p>}{runs.map((run) => <div className="history-row grid grid-cols-[1.1fr_1fr_1fr_120px_110px] items-center gap-3 py-4 max-[760px]:grid-cols-2" key={run.id}><span><b>{run.name}</b><small>{run.projection_set?.name ?? run.projection_set_name ?? run.id}</small></span><span className="max-[760px]:hidden">{scenarioName(run)}</span><span className="max-[760px]:hidden">{run.valuation_date ?? '—'}</span><StatusBadge status={statusText(run.status)} /><button className="history-open" onClick={() => onSelect(run)}>Open results <ArrowRight size={14} /></button></div>)}{!loading && !runs.length && <p className="py-4">No backend runs are available for this project.</p>}</div>
+      <div className="flex flex-col">{loading && <p className="py-4">Loading backend run history…</p>}{runs.map((run) => <div className="history-row grid grid-cols-[1.1fr_1fr_1fr_120px_110px] items-center gap-3 py-4 max-[760px]:grid-cols-2" key={run.id}><span><b>{run.name}</b><small>{run.projection_set?.name ?? run.projection_set_name ?? run.id}</small></span><span className="max-[760px]:hidden">{scenarioName(run)}</span><span className="max-[760px]:hidden">{run.valuation_date ?? '—'}</span><StatusBadge status={statusText(run.status)} /><button className="history-open" disabled={!run.results_available} onClick={() => onSelect(run)}>{run.results_available ? 'Open results' : 'Results unavailable'} <ArrowRight size={14} /></button></div>)}{!loading && !runs.length && <p className="py-4">No backend runs are available for this project.</p>}</div>
     </section>
   )
 }
