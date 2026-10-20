@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Activity, AlertCircle, LoaderCircle, Plus } from 'lucide-react'
 import { useApi } from './ApiProvider'
+import { canEditProjectSettings } from './permissions'
 import { useApiQuery } from './useApiQuery'
 import './workspace-gate.css'
 
@@ -20,7 +21,8 @@ const ACTIVE_PROJECT_KEY = 'mentor-amp-active-project'
 const WorkspaceContext = createContext<WorkspaceValue | null>(null)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const { request } = useApi()
+  const { request, user } = useApi()
+  const canCreateProject = canEditProjectSettings(user?.roles ?? [])
   const { data, error, loading, refetch } = useApiQuery<ProjectsResponse>('/v1/projects/')
   const projects = data?.projects ?? []
   const [selectedId, setSelectedId] = useState<string | null>(() => window.sessionStorage.getItem(ACTIVE_PROJECT_KEY))
@@ -30,11 +32,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSelectedId(id)
   }, [])
   const createProject = useCallback(async (name: string, description: string) => {
+    if (!canCreateProject) throw new Error('Only project administrators can create projects.')
     const created = await request<WorkspaceProject>('/v1/projects/', { method: 'POST', body: JSON.stringify({ name, description }) })
     selectProject(created.id)
     refetch()
     return created
-  }, [request, selectProject, refetch])
+  }, [canCreateProject, request, selectProject, refetch])
   const value = useMemo(() => ({ projects, project, projectId: project?.id ?? null, loading, error, selectProject, createProject, refetchProjects: refetch }), [projects, project, loading, error, selectProject, createProject, refetch])
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }
@@ -47,9 +50,13 @@ export function useWorkspace() {
 
 export function WorkspaceGate({ children }: { children: ReactNode }) {
   const { project, loading, error, createProject, refetchProjects } = useWorkspace()
+  const { user } = useApi()
+  const canCreateProject = canEditProjectSettings(user?.roles ?? [])
   if (loading && !project) return <main className="workspace-gate"><div className="workspace-gate-card"><LoaderCircle className="auth-spin" size={22} />Loading your projects…</div></main>
   if (error && !project) return <main className="workspace-gate"><div className="workspace-gate-card"><AlertCircle size={20} /><div><b>Could not load projects</b><p>{error.message}</p><button onClick={refetchProjects}>Try again</button></div></div></main>
-  if (!project) return <CreateFirstProject onCreate={createProject} />
+  if (!project) return canCreateProject
+    ? <CreateFirstProject onCreate={createProject} />
+    : <main className="workspace-gate"><div className="workspace-gate-card"><AlertCircle size={20} /><div><b>No project is assigned to this account</b><p>Ask a project administrator to create a project and add your account.</p></div></div></main>
   return <>{children}</>
 }
 

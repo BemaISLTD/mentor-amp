@@ -18,62 +18,17 @@ import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
 
-const initialReports = [
-  {
-    name: 'GAAP Reserve – Executive Summary',
-    shortName: 'Executive Summary',
-    source: 'Q4 2026 GAAP Reserve',
-    scope: 'MYGA Base · Base scenario',
-    generated: 'Dec 31, 2026 · 10:46 AM',
-    completed: 'Dec 31, 2026 · 10:44 AM',
-    status: 'Validated',
-    formats: ['PDF', 'XLSX'],
-    description: 'Reserve monitoring, cash flow and solvency executive review',
-    sourceRun: 'Q4 2026 GAAP Reserve – MYGA Base',
-    model: 'Model v2.2 · MYGA Base',
-    pdfSize: '1 MB',
-    xlsxSize: '4 MB',
-    selected: true,
-  },
-  {
-    name: 'Scenario Variance Pack',
-    shortName: 'Scenario Variance Pack',
-    source: 'Q4 2026 GAAP Reserve',
-    scope: 'Q4 stress testing',
-    generated: 'Dec 31, 2026 · 10:42 AM',
-    completed: 'Dec 31, 2026 · 10:39 AM',
-    status: 'Draft',
-    formats: ['XLSX', 'CSV'],
-    description: 'Scenario-by-scenario sensitivity and reserve movement analysis',
-    sourceRun: 'Q4 2026 GAAP Reserve – Stress Tests',
-    model: 'Model v2.2 · MYGA Base',
-    pdfSize: '—',
-    xlsxSize: '2 MB',
-  },
-  {
-    name: 'Solvency Summary',
-    shortName: 'Solvency Summary',
-    source: 'Q4 2026 GAAP Reserve',
-    scope: 'Pricing evaluation',
-    generated: 'Dec 30, 2026 · 05:35 PM',
-    completed: 'Dec 30, 2026 · 05:32 PM',
-    status: 'Needs review',
-    formats: ['PDF'],
-    description: 'Capital adequacy and solvency margin review',
-    sourceRun: 'Q4 2026 GAAP Reserve – Pricing Evaluation',
-    model: 'Model v2.2 · MYGA Base',
-    pdfSize: '2 MB',
-    xlsxSize: '—',
-  },
-]
+const runStatusMap = {
+  pending: 'Pending',
+  running: 'Running',
+  success: 'Completed',
+  partial_success: 'Partial success',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+}
 
-const recentExports = [
-  'Reserve Sensitivity Report',
-  'Assumption Sensitivity',
-  'Expense Analysis',
-  'Monthly Performance',
-  'Capital Adequacy',
-]
+const normalizeRunStatus = (value) => String(value ?? '').toLowerCase()
+const isPartialRun = (value) => normalizeRunStatus(value) === 'partial_success'
 
 const reportTabs = [
   'Report Library',
@@ -89,13 +44,14 @@ export function ReportsCompleted({ onNotify }) {
   const reports = (runsQuery.data?.runs ?? []).filter((run) => run.results_available).map((run) => ({
     id: run.id,
     runId: run.id,
+    rawStatus: run.status,
     name: run.name,
     shortName: run.name,
     source: run.projection_set?.name || run.projection_set_name || run.projection_set_id || 'Projection Set',
     scope: run.scenario?.name || run.scenario_name || '—',
     generated: run.created_at || '',
     completed: run.completed_at || '',
-    status: ({ success: 'Completed', partial_success: 'Partial success', failed: 'Failed', running: 'Running', queued: 'Queued' }[run.status] ?? run.status ?? 'Unavailable'),
+    status: runStatusMap[run.status] ?? (run.status ?? 'Unavailable'),
     formats: ['CSV'],
     description: run.illustrative ? 'Illustrative backend result export; not a formal actuarial report.' : 'Backend result export; not a generated PDF/XLSX report.',
     sourceRun: run.name,
@@ -110,8 +66,15 @@ export function ReportsCompleted({ onNotify }) {
   const [statusFilter, setStatusFilter] = useState('All statuses')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [sortNewest, setSortNewest] = useState(true)
-  const selectedSummaryQuery = useApiQuery(selectedReport?.runId ? `/v1/runs/${selectedReport.runId}/summary` : null)
-  const selectedAggregateQuery = useApiQuery(selectedReport?.runId ? `/v1/runs/${selectedReport.runId}/aggregates?group_by=projection_year` : null)
+  const [partialApprovalRunId, setPartialApprovalRunId] = useState(null)
+  const includePartialResults = Boolean(selectedReport && partialApprovalRunId === selectedReport.runId)
+  const isPartialSelectedRun = Boolean(selectedReport && isPartialRun(selectedReport.rawStatus))
+  const selectedSummaryQuery = useApiQuery(selectedReport?.runId && (!isPartialSelectedRun || includePartialResults)
+    ? `/v1/runs/${selectedReport.runId}/summary${isPartialSelectedRun && includePartialResults ? '?include_partial=true' : ''}`
+    : null)
+  const selectedAggregateQuery = useApiQuery(selectedReport?.runId && (!isPartialSelectedRun || includePartialResults)
+    ? `/v1/runs/${selectedReport.runId}/aggregates?group_by=projection_year${isPartialSelectedRun && includePartialResults ? '&include_partial=true' : ''}`
+    : null)
 
   useEffect(() => {
     if (!selectedReport && reports[0]) setSelectedReport(reports[0])
@@ -133,10 +96,40 @@ export function ReportsCompleted({ onNotify }) {
   }, [query, reports, sortNewest, statusFilter])
 
   const downloadReport = async (report, format = 'CSV') => {
-    if (format !== 'CSV') { onNotify(`The backend currently provides CSV exports only; ${format} report rendering is unavailable.`); return }
+    if (format !== 'CSV') {
+      onNotify(`The backend currently provides CSV exports only; ${format} report rendering is unavailable.`)
+      return
+    }
+
+    const partialRun = isPartialRun(report.rawStatus)
+    const allowPartial = partialRun && report.runId === selectedReport?.runId && includePartialResults
+    let partialApproved = allowPartial
+
+    if (partialRun && !partialApproved) {
+      const confirmed = window.confirm('This run is incomplete. Show incomplete results?')
+      if (!confirmed) {
+        onNotify('Incomplete results were not exported.')
+        return
+      }
+      partialApproved = true
+      setPartialApprovalRunId(report.runId)
+    }
+
+    const queryString = partialRun && partialApproved
+      ? '?group_by=projection_year&include_partial=true'
+      : '?group_by=projection_year'
+    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
+
     try {
-      const response = await fetch(`${baseUrl}/v1/runs/${report.runId}/export.csv?group_by=projection_year`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      if (!response.ok) throw new Error(`CSV export failed (${response.status}).`)
+      const response = await fetch(`${baseUrl}/v1/runs/${report.runId}/export.csv${queryString}`, {
+        headers: authHeaders,
+      })
+      if (!response.ok) throw new Error(response.status === 403
+        ? 'You do not have permission to export this run. Contact a project administrator if you need access.'
+        : `CSV export failed (${response.status}).`)
+
+      const completeHeader = response.headers.get('X-MentorAmp-Complete')
+
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -144,8 +137,12 @@ export function ReportsCompleted({ onNotify }) {
       anchor.download = `${report.shortName.toLowerCase().replace(/[^a-z0-9_-]+/g, '-')}.csv`
       anchor.click()
       URL.revokeObjectURL(url)
-      onNotify(`${report.name} backend CSV downloaded`)
-    } catch (error) { onNotify(error instanceof Error ? error.message : 'Could not download CSV export') }
+      onNotify(completeHeader?.toLowerCase() === 'false'
+        ? `${report.name} CSV downloaded; the backend marked the data incomplete.`
+        : `${report.name} backend CSV downloaded`)
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Could not download CSV export')
+    }
   }
 
   const selectReport = (report) => setSelectedReport(report)
@@ -164,7 +161,7 @@ export function ReportsCompleted({ onNotify }) {
         <button className="report-view-button" onClick={() => unavailable('Alternate report views')}><span>☷</span>View</button>
         <button className="report-new-button" onClick={() => unavailable('Report-definition creation')}><Plus size={18} />New report definition</button>
       </div>
-      {filtersOpen && <div className="report-filter-panel flex items-center gap-3 rounded-lg border bg-white px-4 py-3"><label>Status<select onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}><option>All statuses</option><option>Completed</option><option>Failed</option><option>Partial success</option><option>Running</option><option>Queued</option></select></label><button onClick={() => setStatusFilter('All statuses')}>Clear filters</button></div>}
+      {filtersOpen && <div className="report-filter-panel flex items-center gap-3 rounded-lg border bg-white px-4 py-3"><label>Status<select onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}><option>All statuses</option><option>Completed</option><option>Failed</option><option>Partial success</option><option>Running</option><option>Pending</option></select></label><button onClick={() => setStatusFilter('All statuses')}>Clear filters</button></div>}
       <nav className="report-tabs flex items-center gap-7 overflow-x-auto" aria-label="Report views">{reportTabs.map((tab) => <button className={activeTab === tab ? 'report-tab-active' : ''} key={tab} onClick={() => setActiveTab(tab)}>{tab}</button>)}</nav>
       <section className="completed-reports-section">
         <div className="completed-reports-heading flex flex-wrap items-end justify-between gap-3"><div><h2>Completed Reports</h2><p>Backend run results. Select a run to preview its summary and download available exports.</p></div><div className="report-sort-count"><span>{visibleReports.length} runs with results</span><button onClick={() => setSortNewest((current) => !current)}>Sort by <b>Generated ({sortNewest ? 'newest' : 'oldest'})</b><ChevronDown size={13} /></button></div></div>
@@ -175,7 +172,7 @@ export function ReportsCompleted({ onNotify }) {
           {!runsQuery.loading && !runsQuery.error && visibleReports.length === 0 && <p className="report-empty-state">No completed runs with result rows match the current search and filters.</p>}
         </div>
       </section>
-      {selectedReport && <ReportDetails report={selectedReport} summary={selectedSummaryQuery.data} aggregate={selectedAggregateQuery.data} summaryLoading={selectedSummaryQuery.loading} summaryError={selectedSummaryQuery.error} onClose={() => setSelectedReport(null)} onExport={downloadReport} onNotify={onNotify} />}
+      {selectedReport && <ReportDetails report={selectedReport} summary={selectedSummaryQuery.data} aggregate={selectedAggregateQuery.data} summaryLoading={selectedSummaryQuery.loading} summaryError={selectedSummaryQuery.error} includePartialResults={includePartialResults} onAllowPartial={() => setPartialApprovalRunId(selectedReport.runId)} onClose={() => setSelectedReport(null)} onExport={downloadReport} onNotify={onNotify} />}
     </div>
   )
 }
@@ -210,10 +207,10 @@ function ReportRow({ report, selected, onSelect, onExport, onShare, onNotify }) 
 }
 
 
-function ReportDetails({ report, summary, aggregate, summaryLoading, summaryError, onClose, onExport, onNotify }) {
+function ReportDetails({ report, summary, aggregate, summaryLoading, summaryError, includePartialResults, onAllowPartial, onClose, onExport, onNotify }) {
   const status = report.status
   return <section className="report-details-panel rounded-[8px] bg-white"><div className="report-details-title-row"><span className="report-details-icon"><FileText size={25} /></span><div><h2>{report.name}</h2><p>{report.description}</p></div><span className={`completed-report-status status-${status.toLowerCase().replaceAll(' ', '-')}`}><i />{status}</span><button aria-label="Close report details" onClick={onClose}><X size={17} /></button></div>
-    <div className="report-details-content"><div className="report-details-meta"><h3>Report details</h3><DetailLine label="Source run" value={report.sourceRun} link onClick={() => onNotify('Source run details are available in Results Explorer after selecting this run.')} /><DetailLine label="Model / basis version" value={report.model} /><DetailLine label="Generated" value={report.generated ? new Date(report.generated).toLocaleString() : '—'} /><DetailLine label="Completed" value={report.completed ? new Date(report.completed).toLocaleString() : '—'} /><DetailLine label="Status" value={status} status={status} /></div>
+    <div className="report-details-content">{isPartialRun(report.rawStatus) && <section className="result-panel rounded-[10px] bg-[#fff7df] p-4" role="alert"><b>This run is incomplete.</b><p>Some policies did not finish. {includePartialResults ? 'Incomplete results are included in this preview and any export.' : 'The preview is withheld until you choose to show incomplete results.'}</p>{!includePartialResults && <button className="report-preview-action" onClick={onAllowPartial}>Show incomplete results</button>}</section>}<div className="report-details-meta"><h3>Report details</h3><DetailLine label="Source run" value={report.sourceRun} link onClick={() => onNotify('Source run details are available in Results Explorer after selecting this run.')} /><DetailLine label="Model / basis version" value={report.model} /><DetailLine label="Generated" value={report.generated ? new Date(report.generated).toLocaleString() : '—'} /><DetailLine label="Completed" value={report.completed ? new Date(report.completed).toLocaleString() : '—'} /><DetailLine label="Status" value={status} status={status} /></div>
       <div className="report-formats-card"><h3>Available formats</h3><button disabled title="PDF rendering is unavailable in the backend"><span className="format-pdf"><FileText size={20} /></span><span><b>PDF</b><small>Unavailable</small></span><Download size={15} /></button>{report.formats.includes('XLSX') ? <button disabled title="XLSX rendering is unavailable in the backend"><span className="format-xlsx"><FileText size={20} /></span><span><b>XLSX</b><small>Unavailable</small></span><Download size={15} /></button> : report.formats.includes('CSV') ? <button onClick={() => onExport(report, 'CSV')}><span className="format-xlsx"><FileText size={20} /></span><span><b>CSV</b><small>Backend result export</small></span><Download size={15} /></button> : <span className="format-unavailable">No spreadsheet version available</span>}</div>
       {summaryLoading && <p>Loading actual run summary…</p>}{summaryError && <p role="alert">Could not load run summary: {summaryError.message}</p>}{summary && <div className="report-preview-summary"><b>{summary.headline?.label ?? 'Backend run summary'}</b><p>{summary.headline?.value == null ? 'No headline output available' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(summary.headline.value)} {summary.headline?.unit ?? ''} · {summary.policy_count ?? 0} policies · {summary.output_row_count?.toLocaleString() ?? 0} result rows{summary.illustrative ? ' · Illustrative data' : ''}</p></div>}
       <ReportPreview report={report} aggregate={aggregate} /></div>

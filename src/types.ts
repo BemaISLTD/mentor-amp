@@ -1,14 +1,14 @@
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-export type ScreenName = 'Dashboard' | 'Models' | 'Inputs' | 'Scenarios' | 'Formulas' | 'Projections' | 'Runs' | 'Results' | 'Reports' | 'Investigate' | 'Mentor' | 'Admin / Settings'
+export type ScreenName = 'Dashboard' | 'Models' | 'Inputs' | 'Data Manager' | 'Scenarios' | 'Formulas' | 'Projections' | 'Runs' | 'Results' | 'Reports' | 'Investigate' | 'Mentor' | 'Admin / Settings'
 
 export type NavItem = { label: ScreenName; icon: LucideIcon; group?: string }
-export type ModelStatus = 'Validated' | 'Needs review' | 'Draft'
+export type ModelStatus = 'validated' | 'needs_review' | 'draft' | 'approved' | 'rejected' | 'superseded' | 'legacy_unvalidated' | 'published'
 export type LineageStatus = 'Shared' | 'Inherited' | 'Overridden' | 'Local'
-export type ExecutionStatus = 'Completed' | 'Running' | 'Paused' | 'Cancelled' | 'Stale' | 'Validated' | 'Needs review'
+export type ExecutionStatus = 'pending' | 'running' | 'success' | 'partial_success' | 'failed' | 'cancelled'
 
-export type Model = { name: string; version: string; basis: string; product: string; status: ModelStatus; updated: string; owner: string; runs: number }
+export type Model = { id?: string; name: string; version: string; basis: string; product: string; status: ModelStatus; updated: string; owner: string; runs: number }
 export type RunRecord = { name: string; scenario: string; date: string; modified: string }
 export type RunSetRun = {
   id: string
@@ -16,7 +16,7 @@ export type RunSetRun = {
   projectionSetName: string
   scenarioId: string
   scenarioName: string
-  status: 'Queued' | 'Running' | 'Completed' | 'Failed'
+  status: 'pending' | 'running' | 'success' | 'partial_success' | 'failed' | 'cancelled'
   progress: { total: number; done: number; percent: number; unit: 'policies'; eta_seconds?: number }
   events: { id: number; timestamp: string; level: 'info' | 'warning' | 'error'; step: string; message: string }[]
 }
@@ -26,7 +26,7 @@ export type RunSetRecord = {
   name: string
   notes: string | null
   submittedAt: string
-  status: 'Queued' | 'Running' | 'Completed' | 'Failed'
+  status: 'queued' | 'running' | 'success' | 'partial_success' | 'failed' | 'cancelled'
   projectionSetIds: string[]
   scenarioIds: string[]
   runs: RunSetRun[]

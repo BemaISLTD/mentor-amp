@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowDownUp, ArrowRight, ArrowUpRight, Boxes, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock3, Code2, Database, GitBranch, Info, Layers, LockKeyhole, MoreVertical, Pencil, Percent, Plus, Search, ShieldCheck, Share2, UsersRound, Workflow, X } from 'lucide-react'
+import { ArrowDownUp, ArrowRight, ArrowUpRight, Boxes, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock3, Database, GitBranch, Info, Layers, MoreVertical, Pencil, Plus, Search, ShieldCheck, Share2, Workflow } from 'lucide-react'
 import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
@@ -13,7 +13,7 @@ export function FormulaLibrary({ query = '', onNotify, onLineageChange, onDetail
   const { request } = useApi()
   const modelsQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/models` : null)
   const models = modelsQuery.data?.models ?? EMPTY_MODELS
-  const versions = models.filter(model => model.current_version?.id)
+  const versions = useMemo(() => models.filter(model => model.current_version?.id), [models])
   const [groups, setGroups] = useState([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupsError, setGroupsError] = useState('')
@@ -27,14 +27,13 @@ export function FormulaLibrary({ query = '', onNotify, onLineageChange, onDetail
       return (result.groups ?? []).map(group => ({ ...group, model }))
     })).then(results => { if (active) setGroups(results.flat()) }).catch(error => { if (active) { setGroups([]); setGroupsError(error instanceof Error ? error.message : 'Could not load formula groups.') } }).finally(() => { if (active) setGroupsLoading(false) })
     return () => { active = false }
-  }, [request, models])
+  }, [request, versions])
   const [releaseFilter, setReleaseFilter] = useState('All')
   const [ownerFilter, setOwnerFilter] = useState('All owners')
   const [usageFilter, setUsageFilter] = useState('Any usage')
   const [selectedId, setSelectedId] = useState(null)
   const [sortNewestFirst, setSortNewestFirst] = useState(true)
   const [view, setView] = useState('library')
-  const [showUnavailable, setShowUnavailable] = useState(false)
   const changeView = next => { setView(next); onLineageChange?.(next === 'lineage'); onDetailChange?.(next === 'detail') }
   const visibleGroups = useMemo(() => groups.filter(g => {
     const state = g.lineage_state ?? ''

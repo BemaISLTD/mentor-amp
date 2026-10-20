@@ -18,6 +18,8 @@ import {
 } from 'lucide-react'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
+import { canImportData, canSubmitRuns } from '../../api/permissions'
+import { useApi } from '../../api/ApiProvider'
 import { RunSetSubmissionDialog } from '../run-set-workflow/RunSetWorkflow'
 import { ProjectionSetCreateDialog } from './ProjectionSetCreateDialog'
 import './projection-sets.css'
@@ -26,6 +28,9 @@ const EMPTY_PROJECTION_SETS = []
 
 export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateOpened, onSetupStarted, onSetupFinished, onNavigateToInput, onNavigateToScenario }) {
   const { projectId } = useWorkspace()
+  const { user } = useApi()
+  const canCreateProjectionSet = canImportData(user?.roles ?? [])
+  const canCreateRunSet = canSubmitRuns(user?.roles ?? [])
   const projectionQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/projection-sets` : null)
   const consumersQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/run-sets` : null, 10000)
   const apiSets = projectionQuery.data?.projection_sets ?? EMPTY_PROJECTION_SETS
@@ -34,9 +39,11 @@ export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateO
   const [statusFilter, setStatusFilter] = useState('All statuses')
   const [filterOpen, setFilterOpen] = useState(false)
   const [view, setView] = useState('list')
-  const [createOpen, setCreateOpen] = useState(startCreate)
+  const [createOpen, setCreateOpen] = useState(startCreate && canCreateProjectionSet)
   const [runSetDialogOpen, setRunSetDialogOpen] = useState(false)
   const [selectedSet, setSelectedSet] = useState(null)
+  const [manageOpen, setManageOpen] = useState(false)
+  const [preferredSetId, setPreferredSetId] = useState('')
 
   useEffect(() => {
     const mapped = apiSets.map((item) => ({
@@ -61,13 +68,14 @@ export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateO
       raw: item,
     }))
     setSets(mapped)
-    setSelectedSet(current => mapped.find(item => item.id === current?.id) ?? mapped[0] ?? null)
-  }, [apiSets])
+    setSelectedSet(current => mapped.find(item => item.id === (preferredSetId || current?.id)) ?? mapped[0] ?? null)
+    if (preferredSetId && mapped.some(item => item.id === preferredSetId)) setPreferredSetId('')
+  }, [apiSets, preferredSetId])
 
   useEffect(() => {
-    if (!startCreate) return
+    if (!startCreate || !canCreateProjectionSet) return
     onCreateOpened?.()
-  }, [startCreate, onCreateOpened])
+  }, [startCreate, canCreateProjectionSet, onCreateOpened])
 
   const visibleSets = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -142,6 +150,7 @@ export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateO
                 view={view}
                 onSelect={() => setSelectedSet(set)}
                 onNotify={onNotify}
+                onViewDetails={() => { setSelectedSet(set); setManageOpen(true) }}
               />
             ))}
             {!projectionQuery.loading && !projectionQuery.error && visibleSets.length === 0 && <p className="projection-empty-state">No Projection Sets are saved for this project yet.</p>}
@@ -151,14 +160,23 @@ export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateO
         <ProjectionActionsRail
           selectedSet={selectedSet}
           selectedModel={selectedSet ? { name: selectedSet.modelName, version: selectedSet.modelVersion } : null}
-          onCreate={() => { onSetupStarted?.(); setCreateOpen(true) }}
-          onCreateRun={() => selectedSet ? setRunSetDialogOpen(true) : onNotify('Create a Projection Set before creating a Run Set.')}
+          onCreate={() => { if (!canCreateProjectionSet) return; if (onSetupStarted) onSetupStarted(); setCreateOpen(true) }}
+          onCreateRun={() => { if (!canCreateRunSet) return; if (selectedSet) setRunSetDialogOpen(true); else onNotify('Create a Projection Set before creating a Run Set.') }}
+          onManage={() => { if (selectedSet) setManageOpen(true) }}
           onNotify={onNotify}
+          canCreateProjectionSet={canCreateProjectionSet}
+          canCreateRunSet={canCreateRunSet}
         />
       </div>
 
-      {createOpen && <ProjectionSetCreateDialog onClose={() => { setCreateOpen(false); onSetupFinished?.() }} onCreated={(message) => { projectionQuery.refetch(); setCreateOpen(false); onSetupFinished?.(); onNotify(message) }} onNavigateToInput={onNavigateToInput} onNavigateToScenario={onNavigateToScenario} />}
+      {createOpen && canCreateProjectionSet && <ProjectionSetCreateDialog onClose={() => { setCreateOpen(false); onSetupFinished?.() }} onCreated={(message) => { projectionQuery.refetch(); setCreateOpen(false); onSetupFinished?.(); onNotify(message) }} onNavigateToInput={onNavigateToInput} onNavigateToScenario={onNavigateToScenario} />}
       {runSetDialogOpen && selectedSet && <RunSetSubmissionDialog projectionSets={sets} initialProjectionSetId={selectedSet.id} onClose={() => setRunSetDialogOpen(false)} />}
+      {manageOpen && selectedSet && <ProjectionSetDetails
+        projectionSet={selectedSet.raw}
+        canEdit={canCreateProjectionSet}
+        onClose={() => setManageOpen(false)}
+        onUpdated={(message, newId) => { projectionQuery.refetch(); if (newId) setPreferredSetId(newId); onNotify(message) }}
+      />}
     </div>
   )
 }
@@ -174,7 +192,7 @@ function ProjectionSummary({ icon, value, label, detail, tone, onClick }) {
   )
 }
 
-function ProjectionSetCard({ set, selected, view, onSelect, onNotify }) {
+function ProjectionSetCard({ set, selected, view, onSelect, onNotify, onViewDetails }) {
   const isGrid = view === 'grid'
   return (
     <article className={`projection-set-card ${selected ? 'projection-set-card-selected' : ''} ${isGrid ? 'projection-set-card-grid' : ''}`}>
@@ -195,6 +213,7 @@ function ProjectionSetCard({ set, selected, view, onSelect, onNotify }) {
         <span><Check size={18} />{set.capture}</span>
         <small>{set.captureDetail || 'No additional validation detail was returned by the backend.'}</small>
         <button onClick={() => onNotify(set.captureDetail ? `${set.name}: ${set.captureDetail}` : `No additional validation detail is available for ${set.name}.`)}>View validation details <ArrowRight size={13} /></button>
+        <button onClick={onViewDetails}>View Projection Set details <ArrowRight size={13} /></button>
       </div>
       <button aria-label={`Select ${set.name}`} className="projection-card-arrow" onClick={onSelect}><ArrowRight size={18} /></button>
     </article>
@@ -227,11 +246,12 @@ function ProjectionPreview({ type }) {
   )
 }
 
-function ProjectionActionsRail({ selectedSet, selectedModel, onCreate, onCreateRun, onNotify }) {
+function ProjectionActionsRail({ selectedSet, selectedModel, onCreate, onCreateRun, onManage, onNotify, canCreateProjectionSet, canCreateRunSet }) {
   return (
     <aside className="projection-actions-rail flex flex-col gap-3 rounded-[10px] bg-white p-3">
-      <button className="projection-primary-action" onClick={onCreate}><Plus size={17} />Create Projection Set</button>
-      <button className="projection-secondary-action" onClick={onCreateRun}><span>▷</span>Create Run Set</button>
+      {canCreateProjectionSet && <button className="projection-primary-action" onClick={onCreate}><Plus size={17} />Create Projection Set</button>}
+      {selectedSet && <button className="projection-secondary-action" onClick={onManage}><FileText size={16} />View / manage selected set</button>}
+      {canCreateRunSet && <button className="projection-secondary-action" onClick={onCreateRun}><span>▷</span>Create Run Set</button>}
       <div className="projection-resource-heading">Helpful resources</div>
       <ResourceLink icon={<Database size={17} />} title="Projection set guide" detail="Learn best practices" onClick={() => onNotify('Projection Set guide content is not available in this workspace yet.')} />
       <ResourceLink icon={<FileText size={17} />} title="Validation rules" detail="Understand checks" onClick={() => onNotify('Validation rule documentation is not available in this workspace yet.')} />
@@ -254,4 +274,149 @@ function ActivityIcon() {
 
 function ResourceLink({ icon, title, detail, onClick }) {
   return <button className="projection-resource-link" onClick={onClick}><span>{icon}</span><span><b>{title}</b><small>{detail}</small></span></button>
+}
+
+function ProjectionSetDetails({ projectionSet, canEdit, onClose, onUpdated }) {
+  const { projectId } = useWorkspace()
+  const { request } = useApi()
+  const detailQuery = useApiQuery(projectionSet?.id ? `/v1/projection-sets/${projectionSet.id}` : null)
+  const scenarioQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/scenario-sets` : null)
+  const detail = detailQuery.data ?? projectionSet
+  const scenarios = (scenarioQuery.data?.scenario_sets ?? []).flatMap(group => group.scenarios ?? [])
+  const attachedScenarioIds = new Set((detail?.scenarios ?? []).map(scenario => scenario.id))
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(detail?.name ?? '')
+  const [description, setDescription] = useState(detail?.description ?? '')
+  const [valuationDate, setValuationDate] = useState(detail?.valuation_date ?? '')
+  const [horizon, setHorizon] = useState(detail?.horizon_months ?? 12)
+  const [traceMode, setTraceMode] = useState(detail?.trace_scope?.mode ?? 'none')
+  const [tracePolicyIds, setTracePolicyIds] = useState((detail?.trace_scope?.policy_ids ?? []).join(', '))
+  const [scenarioId, setScenarioId] = useState('')
+  const [versionLabel, setVersionLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setName(detail?.name ?? '')
+    setDescription(detail?.description ?? '')
+    setValuationDate(detail?.valuation_date ?? '')
+    setHorizon(detail?.horizon_months ?? 12)
+    setTraceMode(detail?.trace_scope?.mode ?? 'none')
+    setTracePolicyIds((detail?.trace_scope?.policy_ids ?? []).join(', '))
+  }, [detail])
+
+  const refreshDetail = (result, message) => {
+    detailQuery.refetch()
+    onUpdated(message, result?.id)
+  }
+
+  const edit = async () => {
+    if (!canEdit || busy || !detail?.id) return
+    setBusy(true)
+    setError('')
+    try {
+      const patch = {
+        name: name.trim(),
+        description: description.trim(),
+        valuation_date: valuationDate,
+        horizon_months: Number(horizon),
+        trace_scope: {
+          mode: traceMode,
+          policy_ids: traceMode === 'selected_policies'
+            ? tracePolicyIds.split(',').map(value => value.trim()).filter(Boolean)
+            : [],
+        },
+      }
+      const updated = await request(`/v1/projection-sets/${detail.id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+      const validated = await request(`/v1/projection-sets/${detail.id}/validate`, { method: 'POST' })
+      refreshDetail(validated ?? updated, `Projection Set updated and revalidated (${validated?.status ?? 'validation status unavailable'}).`)
+      setEditing(false)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not update the Projection Set.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const attachScenario = async () => {
+    if (!canEdit || busy || !detail?.id || !scenarioId) return
+    setBusy(true)
+    setError('')
+    try {
+      const updated = await request(`/v1/projection-sets/${detail.id}/scenarios`, {
+        method: 'POST',
+        body: JSON.stringify({ scenario_id: scenarioId }),
+      })
+      const validated = await request(`/v1/projection-sets/${detail.id}/validate`, { method: 'POST' })
+      refreshDetail(validated ?? updated, `Scenario attached; Projection Set revalidated (${validated?.status ?? 'validation status unavailable'}).`)
+      setScenarioId('')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not attach the scenario.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const duplicate = async () => {
+    if (!canEdit || busy || !detail?.id) return
+    setBusy(true)
+    setError('')
+    try {
+      const copy = await request(`/v1/projection-sets/${detail.id}/duplicate`, {
+        method: 'POST',
+        body: JSON.stringify(versionLabel.trim() ? { version_label: versionLabel.trim() } : {}),
+      })
+      onUpdated(`Created draft duplicate ${copy.name ?? copy.id}.`, copy.id)
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not duplicate the Projection Set.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="projection-modal-backdrop" onClick={onClose}>
+      <section className="projection-modal projection-detail-modal" role="dialog" aria-modal="true" aria-labelledby="projection-detail-title" onClick={event => event.stopPropagation()}>
+        <header className="projection-detail-heading">
+          <div><span className="projection-modal-eyebrow">Projection Set · {detail?.status ?? 'Loading'}</span><h2 id="projection-detail-title">{detail?.name ?? 'Loading Projection Set…'}</h2></div>
+          <button aria-label="Close Projection Set details" onClick={onClose}><X size={19} /></button>
+        </header>
+        {detailQuery.loading && <p role="status">Loading Projection Set details…</p>}
+        {detailQuery.error && <p className="projection-create-blocked" role="alert">Could not load details: {detailQuery.error.message}</p>}
+        {scenarioQuery.error && <p className="projection-create-blocked" role="alert">Could not load scenarios: {scenarioQuery.error.message}</p>}
+        {error && <p className="projection-create-blocked" role="alert">{error}</p>}
+        {detail && <>
+          <div className="projection-detail-facts">
+            <span><b>Model</b>{detail.model_version?.model_name ?? detail.model_version?.model_id ?? '—'} · {detail.model_version?.version_label ?? '—'}</span>
+            <span><b>Valuation / horizon</b>{detail.valuation_date ?? '—'} · {detail.horizon_months ?? '—'} months</span>
+            <span><b>Inputs</b>{(detail.inputs?.inforce_files ?? []).map(item => item.name).join(', ') || 'None'}; {(detail.inputs?.assumption_tables ?? []).length} assumption and {(detail.inputs?.factor_tables ?? []).length} factor tables</span>
+            <span><b>Scenarios</b>{(detail.scenarios ?? []).map(item => item.name).join(', ') || 'None attached'}</span>
+            <span><b>Outputs</b>{(detail.output_variables ?? []).join(', ') || 'None configured'}</span>
+            <span><b>Trace scope</b>{detail.trace_scope?.mode ?? 'none'}{detail.trace_scope?.policy_ids?.length ? ` · ${detail.trace_scope.policy_ids.join(', ')}` : ''}</span>
+          </div>
+          {detail.validation && <details className="projection-detail-validation"><summary>Validation · {detail.validation.status}</summary>{(detail.validation.checks ?? []).map(check => <p key={check.code}><b>{check.status}</b> · {check.label}{check.message ? ` — ${check.message}` : ''}</p>)}</details>}
+          {canEdit && <div className="projection-detail-actions">
+            <button className="projection-secondary-action" onClick={() => setEditing(current => !current)}>{editing ? 'Cancel edit' : 'Edit configuration'}</button>
+            <label>New draft version<input value={versionLabel} onChange={event => setVersionLabel(event.target.value)} placeholder="Optional version label" maxLength={30} /></label>
+            <button className="projection-secondary-action" disabled={busy} onClick={() => void duplicate()}>Duplicate as draft</button>
+            <div className="projection-detail-attach">
+              <label>Add scenario<select value={scenarioId} onChange={event => setScenarioId(event.target.value)}><option value="">Select a scenario</option>{scenarios.filter(item => !attachedScenarioIds.has(item.id)).map(item => <option key={item.id} value={item.id}>{item.name} · {item.status}</option>)}</select></label>
+              <button className="projection-secondary-action" disabled={busy || !scenarioId} onClick={() => void attachScenario()}>Attach scenario</button>
+            </div>
+          </div>}
+          {editing && <div className="projection-detail-edit">
+            <label>Name<input value={name} onChange={event => setName(event.target.value)} maxLength={255} /></label>
+            <label>Description<textarea value={description} onChange={event => setDescription(event.target.value)} /></label>
+            <label>Valuation date<input type="date" value={valuationDate} onChange={event => setValuationDate(event.target.value)} /></label>
+            <label>Horizon in months<input type="number" min={1} max={1200} value={horizon} onChange={event => setHorizon(event.target.value)} /></label>
+            <label>Trace capture<select value={traceMode} onChange={event => setTraceMode(event.target.value)}><option value="none">None</option><option value="selected_policies">Selected policies</option><option value="all">All policies</option></select></label>
+            {traceMode === 'selected_policies' && <label>Policy IDs<input value={tracePolicyIds} onChange={event => setTracePolicyIds(event.target.value)} placeholder="Comma-separated policy IDs" /></label>}
+            <button className="projection-primary-action" disabled={busy || !name.trim() || !valuationDate || Number(horizon) < 1 || Number(horizon) > 1200 || (traceMode === 'selected_policies' && !tracePolicyIds.trim())} onClick={() => void edit()}>{busy ? 'Saving…' : 'Save and revalidate'}</button>
+          </div>}
+          {!canEdit && <p className="projection-detail-readonly">You can view this set; editing, duplication and scenario attachment require an editor or owner membership.</p>}
+        </>}
+      </section>
+    </div>
+  )
 }

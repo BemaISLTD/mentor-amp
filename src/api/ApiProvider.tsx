@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001').replace(/\/+$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://samelias1-svcai.hf.space').replace(/\/+$/, '')
 const TOKEN_KEY = 'mentor-amp-access-token'
 
 export type ApiUser = {
@@ -36,6 +36,9 @@ type ApiContextValue = {
 const ApiContext = createContext<ApiContextValue | null>(null)
 
 function errorMessage(body: unknown, status: number): { message: string; code?: string } {
+  if (status === 403) {
+    return { message: 'You do not have permission to perform this action. Contact a project administrator if you need access.' }
+  }
   if (body && typeof body === 'object') {
     const payload = body as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
     const detail = payload.error?.message ?? payload.detail

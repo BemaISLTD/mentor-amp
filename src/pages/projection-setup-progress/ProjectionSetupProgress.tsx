@@ -12,6 +12,7 @@ type Props = {
 
 const validatedAssumptionIds = new Set(['asm-myga-lapse-v42', 'asm-expense-v21'])
 const validatedFactorIds = new Set(['factor-discount-v50', 'factor-expense-v20'])
+const displayStatus = (status?: string) => ({ validated: 'Validated', needs_review: 'Needs review', draft: 'Draft', approved: 'Approved', rejected: 'Rejected', superseded: 'Superseded', legacy_unvalidated: 'Legacy unvalidated', published: 'Published' }[status ?? ''] ?? status ?? 'Unknown')
 
 export function ProjectionSetupProgress({ onNavigateToInput, onNavigateToScenario, onReturnToSetup, onClose }: Props) {
   const { projectionInputs, updateProjectionInputs, setActiveScreen } = useApp()
@@ -20,12 +21,12 @@ export function ProjectionSetupProgress({ onNavigateToInput, onNavigateToScenari
   const selectedFactor = factorTableIds.find(id => validatedFactorIds.has(id))
   const horizonValid = Boolean(draft.startMonth && draft.endMonth && draft.startMonth <= draft.endMonth)
   const checks = [
-    { label: 'Select a validated model', value: model?.status === 'Validated' },
-    { label: 'Confirm runnable formulas', value: model?.status === 'Validated' && draft.formulaConfirmed },
-    { label: 'Map and validate inforce', value: Boolean(inforce && inforce.status === 'Validated' && inforce.mappedColumns >= inforce.requiredColumns && draft.inforceConfirmed) },
+    { label: 'Select a validated model', value: model?.status === 'validated' },
+    { label: 'Confirm runnable formulas', value: model?.status === 'validated' && draft.formulaConfirmed },
+    { label: 'Map and validate inforce', value: Boolean(inforce && inforce.status === 'validated' && inforce.mappedColumns >= inforce.requiredColumns && draft.inforceConfirmed) },
     { label: 'Pin an assumption table', value: Boolean(selectedAssumption && draft.assumptionValidated) },
     { label: 'Pin a factor table', value: Boolean(selectedFactor && draft.factorValidated) },
-    { label: 'Attach a compatible scenario', value: Boolean(scenario?.status === 'Validated' && scenario.compatible && draft.scenarioCompatible) },
+    { label: 'Attach a compatible scenario', value: Boolean(scenario?.status === 'validated' && scenario.compatible && draft.scenarioCompatible) },
     { label: 'Set a monthly horizon', value: horizonValid },
   ]
   const completeCount = checks.filter(check => check.value).length
@@ -51,16 +52,16 @@ export function ProjectionSetupProgress({ onNavigateToInput, onNavigateToScenari
         }))
       }}>
         <option value="">Select a model</option>
-        {models.map(candidate => <option key={candidate.name} value={candidate.name}>{candidate.name} · {candidate.version} · {candidate.status}</option>)}
+        {models.map(candidate => <option key={candidate.name} value={candidate.name}>{candidate.name} · {candidate.version} · {displayStatus(candidate.status)}</option>)}
       </select>
     </label>
     <div className="projection-progress-items">
-      <ProgressItem done={model?.status === 'Validated'} title="Model" detail={model ? `${model.name} · ${model.version}` : 'Choose a model version'} onClick={() => setActiveScreen('Models')} />
-      <ProgressItem done={Boolean(inforce && inforce.status === 'Validated' && inforce.mappedColumns >= inforce.requiredColumns)} title="Inforce file" detail={inforce?.name ?? 'Import and map a file'} onClick={() => onNavigateToInput('Import Inforce')} />
+      <ProgressItem done={model?.status === 'validated'} title="Model" detail={model ? `${model.name} · ${model.version}` : 'Choose a model version'} onClick={() => setActiveScreen('Models')} />
+      <ProgressItem done={Boolean(inforce && inforce.status === 'validated' && inforce.mappedColumns >= inforce.requiredColumns)} title="Inforce file" detail={inforce?.name ?? 'Import and map a file'} onClick={() => onNavigateToInput('Import Inforce')} />
       <ProgressItem done={Boolean(selectedAssumption)} title="Assumption tables" detail={selectedAssumption ?? 'Pin a validated table'} onClick={() => onNavigateToInput('Assumption Tables')} />
       <ProgressItem done={Boolean(selectedFactor)} title="Factor tables" detail={selectedFactor ?? 'Pin a validated table'} onClick={() => onNavigateToInput('Factor Tables')} />
-      <ProgressItem done={Boolean(scenario?.status === 'Validated' && scenario.compatible)} title="Scenario" detail={scenario?.name ?? 'Choose a compatible scenario'} onClick={onNavigateToScenario} />
-      <ProgressItem done={model?.status === 'Validated'} title="Published output" detail={model?.status === 'Validated' ? 'Available from selected model' : 'Select a validated model'} onClick={() => setActiveScreen('Models')} />
+      <ProgressItem done={Boolean(scenario?.status === 'validated' && scenario.compatible)} title="Scenario" detail={scenario?.name ?? 'Choose a compatible scenario'} onClick={onNavigateToScenario} />
+      <ProgressItem done={model?.status === 'validated'} title="Published output" detail={model?.status === 'validated' ? 'Available from selected model' : 'Select a validated model'} onClick={() => setActiveScreen('Models')} />
       <ProgressItem done={horizonValid} title="Monthly horizon" detail={`${draft.startMonth} – ${draft.endMonth}`} onClick={() => setActiveScreen('Projections')} />
     </div>
     <div className="projection-progress-checks">

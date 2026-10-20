@@ -609,6 +609,13 @@
   font-weight: 600;
   text-align: right;
 }
+.scenario-detail-card { display: grid; gap: 8px; border-top: 1px solid #e2e8ed; padding-top: 12px; }
+.scenario-detail-card h3 { color: #122142; font-size: 13px; font-weight: 700; }
+.scenario-detail-card h4 { margin-top: 4px; color: #52627a; font-size: 10px; font-weight: 700; }
+.scenario-detail-card > p { color: #71809f; font-size: 9px; overflow-wrap: anywhere; }
+.scenario-detail-row { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid #edf0f2; padding-top: 6px; }
+.scenario-detail-row b { color: #344361; font-size: 9px; }
+.scenario-detail-row span { color: #71809f; font-size: 8px; overflow-wrap: anywhere; }
 
 .scenario-download-button {
   display: flex;

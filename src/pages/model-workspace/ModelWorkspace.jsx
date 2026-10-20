@@ -1,246 +1,199 @@
-import { useMemo, useState } from 'react'
-import {
-  ArrowRight,
-  BarChart3,
-  Box,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  CircleCheck,
-  ClipboardCheck,
-  Database,
-  Folder,
-  FunctionSquare,
-  GitCompareArrows,
-  MoreVertical,
-  Plus,
-  Search,
-  Sparkles,
-} from 'lucide-react'
-import { useApp } from '../../context/useApp'
+import { useState } from 'react'
+import { Archive, ArrowLeft, Plus, RefreshCw, Save } from 'lucide-react'
+import { useApi } from '../../api/ApiProvider'
+import { useApiQuery } from '../../api/useApiQuery'
+import { canImportData } from '../../api/permissions'
 import './model-workspace.css'
 
-const hierarchy = [
-  { id: 'model', name: 'MYGA Reserve Model', type: 'Model', source: 'v3.2', status: 'Validated', depth: 0, icon: 'model', parent: null },
-  { id: 'myga', name: 'MYGA', type: 'Domain', source: 'Inherited', depth: 1, icon: 'folder', parent: 'model' },
-  { id: 'gaap', name: 'GAAP', type: 'Basis', source: 'Inherited', depth: 2, icon: 'folder', parent: 'myga' },
-  { id: 'base', name: 'Base', type: 'Profile', source: 'Inherited', depth: 3, icon: 'model', parent: 'gaap' },
-  { id: 'formula-groups', name: 'Formula Groups', type: 'Folder', source: 'Inherited', depth: 3, icon: 'folder', parent: 'gaap' },
-  { id: 'reserve-calculation', name: 'Reserve Calculation', type: 'Formula Group', source: 'Inherited', depth: 4, icon: 'folder', parent: 'formula-groups' },
-  { id: 'gaap-reserve-logic', name: 'GAAP Reserve Logic', type: 'Formula', source: 'v4.1', status: 'Inherited', depth: 5, icon: 'formula', parent: 'reserve-calculation' },
-  { id: 'reserve-roll-forward', name: 'Reserve Roll Forward', type: 'Formula', source: 'v3.6', status: 'Shared', depth: 5, icon: 'formula', parent: 'reserve-calculation' },
-  { id: 'interest-accrual', name: 'Interest Accrual', type: 'Formula', source: 'v3.4', status: 'Shared', depth: 5, icon: 'formula', parent: 'reserve-calculation' },
-  { id: 'policy-behavior', name: 'Policy Behavior', type: 'Formula Group', source: 'Inherited', depth: 4, icon: 'folder', parent: 'formula-groups', expandable: true },
-  { id: 'mortality-lapse', name: 'Mortality & Lapse', type: 'Formula Group', source: 'Shared', depth: 4, icon: 'folder', parent: 'formula-groups', expandable: true },
-  { id: 'published-outputs', name: 'Published Outputs', type: 'Output Set', source: 'v2.1', status: 'Local', depth: 3, icon: 'output', parent: 'gaap', expandable: true },
-]
+const statusLabel = status => (status ?? 'unknown').replaceAll('_', ' ')
 
-const visibleByDefault = new Set(['model', 'myga', 'gaap', 'formula-groups', 'reserve-calculation'])
+export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) {
+  const { request, user } = useApi()
+  const canEdit = canImportData(user?.roles ?? [])
+  const modelId = model?.id
+  const detailQuery = useApiQuery(modelId ? `/v1/models/${encodeURIComponent(modelId)}` : null)
+  const versionsQuery = useApiQuery(modelId ? `/v1/models/${encodeURIComponent(modelId)}/versions` : null)
+  const detail = detailQuery.data
+  const listedVersions = versionsQuery.data?.versions ?? detail?.versions ?? []
+  const versions = listedVersions.length
+    ? listedVersions
+    : detail?.current_version
+      ? [detail.current_version]
+      : []
+  const usingCurrentVersionFallback = Boolean(versionsQuery.error && !listedVersions.length && detail?.current_version)
+  const [selectedVersionId, setSelectedVersionId] = useState('')
+  const selectedVersion = versions.find(version => version.id === selectedVersionId)
+    ?? versions.find(version => version.is_current)
+    ?? detail?.current_version
+    ?? null
+  const versionId = selectedVersion?.id
+  const structureQuery = useApiQuery(versionId ? `/v1/model-versions/${encodeURIComponent(versionId)}/structure` : null)
+  const variablesQuery = useApiQuery(versionId ? `/v1/model-versions/${encodeURIComponent(versionId)}/variables` : null)
+  const [versionLabel, setVersionLabel] = useState('')
+  const [changeSummary, setChangeSummary] = useState('')
+  const [basis, setBasis] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [notesByVersion, setNotesByVersion] = useState({})
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const notes = selectedVersion
+    ? notesByVersion[selectedVersion.id] ?? selectedVersion.notes ?? ''
+    : ''
 
-function ObjectIcon({ kind }) {
-  if (kind === 'folder') return <Folder className="mw-tree-icon mw-folder-icon" size={23} />
-  if (kind === 'formula') return <FunctionSquare className="mw-tree-icon mw-formula-icon" size={23} />
-  if (kind === 'output') return <BarChart3 className="mw-tree-icon mw-output-icon" size={23} />
-  return <Box className="mw-tree-icon mw-model-icon" size={23} />
-}
+  const createDraftVersion = async () => {
+    if (!canEdit || !modelId || createBusy) return
+    setCreateBusy(true)
+    setCreateError('')
+    try {
+      const created = await request(`/v1/models/${encodeURIComponent(modelId)}/versions`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(versionLabel.trim() ? { version_label: versionLabel.trim() } : {}),
+          ...(selectedVersion?.id ? { parent_version_id: selectedVersion.id } : {}),
+          ...((selectedVersion?.basis ?? basis.trim()) ? { basis: selectedVersion?.basis ?? basis.trim() } : {}),
+          change_summary: changeSummary.trim() || null,
+        }),
+      })
+      setVersionLabel('')
+      setChangeSummary('')
+      setSelectedVersionId(created.id)
+      versionsQuery.refetch()
+      detailQuery.refetch()
+      onNotify(`Draft ${created.version_label} created. It is not runnable until the backend provides a validation or approval workflow.`)
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Could not create a model draft.')
+    } finally {
+      setCreateBusy(false)
+    }
+  }
 
-function TreeRow({ item, selected, expanded, hasChildren, onToggle, onSelect, onMore }) {
+  const saveNotes = async () => {
+    if (!canEdit || !selectedVersion || selectedVersion.status !== 'draft' || saveBusy) return
+    setSaveBusy(true)
+    setActionError('')
+    try {
+      await request(`/v1/model-versions/${encodeURIComponent(selectedVersion.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ notes }),
+      })
+      setNotesByVersion(current => ({ ...current, [selectedVersion.id]: notes }))
+      versionsQuery.refetch()
+      detailQuery.refetch()
+      setEditingNotes(false)
+      onNotify('Draft version notes saved.')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not save the draft notes.')
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  const archiveDraft = async () => {
+    if (!canEdit || !selectedVersion || selectedVersion.status !== 'draft' || saveBusy) return
+    if (!window.confirm(`Archive draft ${selectedVersion.version_label}? This draft will disappear from the version list.`)) return
+    setSaveBusy(true)
+    setActionError('')
+    try {
+      await request(`/v1/model-versions/${encodeURIComponent(selectedVersion.id)}`, { method: 'DELETE' })
+      setSelectedVersionId('')
+      versionsQuery.refetch()
+      detailQuery.refetch()
+      onNotify(`Draft ${selectedVersion.version_label} archived.`)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not archive the draft.')
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  const structure = structureQuery.data
+  const variables = variablesQuery.data?.variables ?? []
+  const formulaGroups = structure?.formula_groups ?? []
+
   return (
-    <div className={`mw-tree-row ${selected ? 'mw-tree-row-selected' : ''}`} role="row">
-      <button
-        className="mw-tree-name"
-        style={{ '--tree-depth': item.depth }}
-        onClick={() => hasChildren ? onToggle(item.id) : onSelect(item.id)}
-        aria-expanded={hasChildren ? expanded : undefined}
-        aria-label={hasChildren ? `${expanded ? 'Collapse' : 'Expand'} ${item.name}` : `Select ${item.name}`}
-      >
-        <span className="mw-tree-indent" />
-        {hasChildren ? expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} /> : <span className="mw-tree-spacer" />}
-        <ObjectIcon kind={item.icon} />
-        <span className="mw-tree-label">{item.name}</span>
-      </button>
-      <span className="mw-tree-type">{item.type}</span>
-      <span className="mw-tree-source">{item.source}</span>
-      <span className="mw-tree-state">
-        {item.status && <span className={`mw-status-pill mw-status-${item.status.toLowerCase().replaceAll(' ', '-')}`}>{item.status}</span>}
-      </span>
-      {selected ? <button className="mw-row-more" aria-label={`More actions for ${item.name}`} onClick={() => onMore(item.name)}><MoreVertical size={19} /></button> : <span className="mw-tree-end" />}
-    </div>
-  )
-}
-
-export function ModelWorkspace({ model, onNotify, onCreateProjection }) {
-  const { openInvestigation } = useApp()
-  const [selectedId, setSelectedId] = useState('gaap-reserve-logic')
-  const [activeTab, setActiveTab] = useState('Overview')
-  const [query, setQuery] = useState('')
-  const [objectType, setObjectType] = useState('All object types')
-  const [expanded, setExpanded] = useState(visibleByDefault)
-
-  const visibleItems = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
-    return hierarchy.filter(item => {
-      const ancestors = []
-      let parentId = item.parent
-      while (parentId) {
-        ancestors.push(parentId)
-        parentId = hierarchy.find(parent => parent.id === parentId)?.parent
-      }
-      const isExpanded = ancestors.every(id => expanded.has(id))
-      const matchesSearch = !normalized || `${item.name} ${item.type} ${item.source}`.toLowerCase().includes(normalized)
-      const matchesType = objectType === 'All object types' || item.type === objectType
-      return isExpanded && matchesSearch && matchesType
-    })
-  }, [expanded, objectType, query])
-
-  const toggleExpanded = id => setExpanded(current => {
-    const next = new Set(current)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  })
-
-  const selected = hierarchy.find(item => item.id === selectedId) ?? hierarchy[6]
-  const runIntent = kind => openInvestigation({ kind, metric: 'net_reserve', runId: 'JR-20261231-001' })
-  const owner = model.owner || 'Andrew Johnson'
-  const modelVersion = model.version || 'v3.2'
-
-  return (
-    <div className="model-workspace">
-      <div className="mw-layout">
-        <div className="mw-main-column">
-          <section className="mw-card mw-hierarchy-card" aria-labelledby="mw-hierarchy-title">
-            <div className="mw-card-heading">
-              <h2 id="mw-hierarchy-title">Model hierarchy</h2>
-              <div className="mw-hierarchy-tools">
-                <label className="mw-type-select">
-                  <span className="sr-only">Filter object type</span>
-                  <select value={objectType} onChange={event => setObjectType(event.target.value)}>
-                    <option>All object types</option>
-                    {['Model', 'Domain', 'Basis', 'Profile', 'Folder', 'Formula Group', 'Formula', 'Output Set'].map(type => <option key={type}>{type}</option>)}
-                  </select>
-                  <ChevronDown size={17} aria-hidden="true" />
-                </label>
-                <button className="mw-icon-action" aria-label="More hierarchy options" onClick={() => onNotify('Model hierarchy options opened')}><MoreVertical size={19} /></button>
-              </div>
-            </div>
-            <label className="mw-tree-search">
-              <Search size={20} />
-              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search model objects..." />
-            </label>
-            <div className="mw-tree-table" role="table" aria-label="Model hierarchy">
-              <div className="mw-tree-header" role="row"><span>Name</span><span>Type</span><span>Source</span><span /><span /></div>
-              <div role="rowgroup">
-                {visibleItems.map(item => (
-                  <TreeRow
-                    key={item.id}
-                    item={item.id === 'model' ? { ...item, name: model.name } : item}
-                    selected={selectedId === item.id}
-                    expanded={expanded.has(item.id)}
-                    hasChildren={hierarchy.some(child => child.parent === item.id) || item.expandable}
-                    onToggle={toggleExpanded}
-                    onSelect={setSelectedId}
-                    onMore={name => onNotify(`${name} options opened`)}
-                  />
-                ))}
-                {visibleItems.length === 0 && <div className="mw-tree-empty">No model objects match your search and filters.</div>}
-              </div>
-            </div>
-          </section>
-
-          <section className="mw-card mw-object-card" aria-label={`Selected object: ${selected.name}`}>
-            <div className="mw-object-heading">
-              <span className="mw-object-symbol"><FunctionSquare size={31} /></span>
-              <h2>Selected object: {selected.name}</h2>
-            </div>
-            <div className="mw-detail-tabs" role="tablist" aria-label="Selected object details">
-              {['Overview', 'Dependencies', 'Consumers', 'History'].map(tab => (
-                <button key={tab} role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? 'mw-detail-tab-active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>
-              ))}
-            </div>
-            {activeTab === 'Overview' ? (
-              <div className="mw-overview-content">
-                <div className="mw-description">
-                  <h3>Description</h3>
-                  <p>Core GAAP reserve calculation logic for MYGA products under the base assumptions. Implements net premium reserve methodology with quarterly projection and statutory-to-GAAP adjustments.</p>
-                </div>
-                <div className="mw-object-metadata">
-                  <dl><dt>Type</dt><dd>{selected.type}</dd><dt>Source</dt><dd>Formula Group / v4.1</dd><dt>Status</dt><dd><span className="mw-status-pill mw-status-inherited">Inherited</span></dd></dl>
-                  <h3>Dependencies (3)</h3>
-                  <div className="mw-dependency-list">
-                    {['Mortality Table', 'Policy Cash Flow', 'Discount Curve'].map(name => <button key={name} onClick={() => onNotify(`${name} dependency selected`)}><Database size={18} />{name}</button>)}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mw-tab-content">
-                {activeTab === 'Dependencies' && <><h3>Dependencies (3)</h3><div className="mw-dependency-list">{['Mortality Table', 'Policy Cash Flow', 'Discount Curve'].map(name => <button key={name} onClick={() => onNotify(`${name} dependency selected`)}><Database size={18} />{name}</button>)}</div></>}
-                {activeTab === 'Consumers' && <><h3>Consumers</h3><p>GAAP Reserve · Net Cash Flows · Pre-Tax Earnings</p></>}
-                {activeTab === 'History' && <><h3>History</h3><p>v4.1 · Inherited from Formula Group · Last updated May 12, 2025</p></>}
-              </div>
-            )}
-            <div className="mw-object-actions">
-              <button onClick={() => runIntent('trace')}><ClipboardCheck size={18} />Trace</button>
-              <button onClick={() => runIntent('compare')}><GitCompareArrows size={18} />Compare source</button>
-              <button onClick={() => runIntent('scratchpad')}><Plus size={20} />Add to Scratchpad</button>
-              <button onClick={() => runIntent('mentor')}><Sparkles size={18} />Ask Mentor</button>
-            </div>
-          </section>
+    <div className="model-workspace flex flex-col gap-4">
+      <header className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[#dce3e9] bg-white p-4">
+        <div className="min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-[#71809f]">Model detail · {detail?.product_code ?? model?.product ?? '—'}</span>
+          <h2 className="mt-1 text-2xl font-bold text-[#101b37]">{detail?.name ?? model?.name ?? 'Model'}</h2>
+          <p className="mt-1 text-xs text-[#71809f]">{detail?.description || 'No description'} · Model ID {detail?.id ?? modelId}</p>
         </div>
-
-        <aside className="mw-side-column">
-          <section className="mw-card mw-overview-card">
-            <h2>Model overview</h2>
-            <dl className="mw-model-facts">
-              <dt>Version</dt><dd><span className="mw-status-pill mw-status-inherited">{modelVersion}</span></dd>
-              <dt>Owner</dt><dd><span className="mw-owner-avatar" />{owner}</dd>
-              <dt>Status</dt><dd className="mw-validated"><i />Validated</dd>
-              <dt>Last updated</dt><dd>{model.updated || 'May 12, 2025'}<small>{model.time || '10:42 AM'}</small></dd>
-            </dl>
-          </section>
-
-          <section className="mw-card mw-readiness-card">
-            <div className="mw-prerequisites-heading">
-              <div><h2>Projection prerequisites</h2><p>Review these before creating a Projection Set.</p></div>
-              <span>Preflight</span>
+        <div className="flex flex-wrap gap-2">
+          {onBack && <button className="model-open-button" onClick={onBack}><ArrowLeft size={15} />Back to models</button>}
+          <button className="model-open-button" onClick={() => { detailQuery.refetch(); versionsQuery.refetch(); if (versionId) { structureQuery.refetch(); variablesQuery.refetch() } }}><RefreshCw size={15} />Refresh</button>
+          <button className="model-open-button" onClick={onCreateProjection}>Create Projection Set</button>
+        </div>
+      </header>
+      {detailQuery.error && <p role="alert">Could not load model detail: {detailQuery.error.message}</p>}
+      <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(280px,.7fr)] items-start gap-4 max-[900px]:grid-cols-1">
+        <main className="flex min-w-0 flex-col gap-4">
+          <section className="mw-card">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="text-base font-bold">Versions</h2><p className="mt-1 text-xs text-[#71809f]">Draft versions are not runnable yet. Formulas are not editable from the UI.</p></div>
+              <span className="text-xs text-[#71809f]">{versions.length} versions</span>
             </div>
-            <ul className="mw-prerequisite-list">
-              <Prerequisite state="review" title="Runnable model version" detail="Confirm formulas are runnable and required variables are defined." />
-              <Prerequisite state="review" title="Validated inforce file" detail="Fingerprint verified and required columns mapped." />
-              <Prerequisite state="warning" title="Assumption and factor tables" detail="Select required tables and pin each by ID. Factor Tables needs review." />
-              <Prerequisite state="ready" title="Compatible scenario" detail="Base scenario is available; confirm compatibility for this model." />
-              <Prerequisite state="ready" title="Published output" detail="3 outputs are published by this model." />
-              <Prerequisite state="review" title="Monthly horizon" detail="Choose a supported monthly projection horizon." />
-              <Prerequisite state="optional" title="Trace scope (optional)" detail="Trace capture is capped. No trace scope selected will show a warning." />
-            </ul>
+            {versionsQuery.loading && <p role="status">Loading model versions…</p>}
+            {versionsQuery.error && <p role="alert">{usingCurrentVersionFallback
+              ? `Could not load full version history: ${versionsQuery.error.message}. Showing the current version from model details.`
+              : `Could not load versions: ${versionsQuery.error.message}`}</p>}
+            <div className="mt-3 flex flex-col gap-2">{versions.map(version => (
+              <button key={version.id} aria-pressed={selectedVersion?.id === version.id} className={`w-full rounded-lg border p-3 text-left ${selectedVersion?.id === version.id ? 'border-[#80c51a] bg-[#f5faee]' : 'border-[#e2e8ed] bg-white'}`} onClick={() => { setSelectedVersionId(version.id); setEditingNotes(false) }}>
+                <span className="flex flex-wrap items-center justify-between gap-2"><b>{version.version_label}</b><span className="rounded-full bg-[#edf1f5] px-2 py-1 text-[10px] uppercase">{statusLabel(version.status)}{version.status === 'draft' ? ' · not runnable yet' : ''}</span></span>
+                <small className="mt-1 block text-[#71809f]">{version.basis ?? 'No basis'} · {version.is_current || version.id === detail?.current_version?.id ? 'Current' : 'Historical'} · {version.created_at ? new Date(version.created_at).toLocaleDateString() : 'Date unavailable'}</small>
+              </button>
+            ))}{!versionsQuery.loading && !versionsQuery.error && !versions.length && <p>No versions are listed for this model.</p>}</div>
           </section>
 
-          <section className="mw-card mw-outputs-card">
-            <div className="mw-outputs-heading"><h2>Published outputs</h2><button onClick={() => onNotify('3 published outputs')}>3 outputs</button></div>
-            <div className="mw-output-table">
-              <div className="mw-output-header"><span>Name</span><span>Consumers</span><span /></div>
-              {[
-                ['GAAP Reserve', '3 consumers'],
-                ['Net Cash Flows', '2 consumers'],
-                ['Pre-Tax Earnings', '3 consumers'],
-              ].map(([name, consumers]) => <div className="mw-output-row" key={name}><Box size={22} /><span>{name}</span><small>{consumers}</small><button aria-label={`More options for ${name}`} onClick={() => onNotify(`${name} output options opened`)}><MoreVertical size={17} /></button></div>)}
-            </div>
-            <button className="mw-view-outputs" onClick={() => onNotify('All published outputs opened')}>View all outputs <ArrowRight size={17} /></button>
+          <section className="mw-card">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-bold">Version structure</h2><p className="mt-1 text-xs text-[#71809f]">{selectedVersion ? `${selectedVersion.version_label} · ${statusLabel(selectedVersion.status)}` : 'Select a model version'}</p></div></div>
+            {structureQuery.loading && <p role="status">Loading model structure…</p>}
+            {structureQuery.error && <p role="alert">Could not load structure: {structureQuery.error.message}</p>}
+            {structure && <div className="mt-3">
+              {selectedVersion?.status === 'draft' && <p className="mb-3 rounded-md bg-[#fff7df] p-2 text-xs text-[#805d10]">This draft is not runnable yet. The backend does not expose model-version approval or validation.</p>}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{Object.entries(structure.facts ?? {}).map(([label, value]) => <div className="rounded-md bg-[#f5f7f8] p-2" key={label}><small className="block text-[#71809f]">{label.replaceAll('_', ' ')}</small><b>{value}</b></div>)}</div>
+              <h3 className="mt-4 font-bold">Hierarchy</h3>
+              <div className="mt-2 flex flex-col">{(structure.hierarchy ?? []).map((item, index) => <div className="flex items-center justify-between gap-2 border-b border-[#edf0f2] py-2 text-xs" key={`${item.id ?? item.label}-${index}`} style={{ paddingLeft: `${Math.min(item.depth ?? 0, 8) * 14}px` }}><span>{item.label}</span><small className="text-[#71809f]">{item.level} · {item.meta}</small></div>)}</div>
+              <h3 className="mt-4 font-bold">Formula groups</h3>
+              <div className="mt-2 flex flex-col gap-2">{formulaGroups.map(group => <article className="rounded-md border border-[#e2e8ed] p-2 text-xs" key={group.id}><b>{group.name}</b><p className="text-[#71809f]">{group.formula_count} formulas · {group.version_label} · {group.lineage_state}</p><small>{group.description}</small></article>)}{!formulaGroups.length && <p>No formula groups reported.</p>}</div>
+              {structure.validation && <details className="mt-3"><summary className="cursor-pointer text-xs font-bold">Validation · {structure.validation.status}</summary><pre className="mt-2 overflow-auto rounded bg-[#f5f7f8] p-2 text-[10px]">{JSON.stringify(structure.validation, null, 2)}</pre></details>}
+            </div>}
           </section>
+
+          <section className="mw-card">
+            <div><h2 className="text-base font-bold">Variables ({variablesQuery.data?.total ?? variables.length})</h2><p className="mt-1 text-xs text-[#71809f]">Definitions used by this model version.</p></div>
+            {variablesQuery.loading && <p role="status">Loading variables…</p>}
+            {variablesQuery.error && <p role="alert">Could not load variables: {variablesQuery.error.message}</p>}
+            <div className="mt-3 overflow-auto"><table className="w-full border-collapse text-left text-xs"><thead><tr className="border-b border-[#e2e8ed] text-[#71809f]"><th className="p-2">Variable</th><th className="p-2">Kind / type</th><th className="p-2">Unit</th><th className="p-2">Required</th><th className="p-2">Source</th></tr></thead><tbody>{variables.map(variable => <tr className="border-b border-[#edf0f2]" key={variable.id}><td className="p-2"><b>{variable.display_name}</b><small className="block text-[#71809f]">{variable.variable_name} · {variable.description}</small></td><td className="p-2">{variable.kind} / {variable.data_type}</td><td className="p-2">{variable.unit ?? '—'}</td><td className="p-2">{variable.required ? 'Yes' : 'No'}</td><td className="p-2">{variable.source?.type ?? '—'}</td></tr>)}</tbody></table></div>
+          </section>
+        </main>
+
+        <aside className="flex flex-col gap-4">
+          <section className="mw-card">
+            <h2 className="text-base font-bold">Model details</h2>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs"><dt className="text-[#71809f]">Status</dt><dd>{statusLabel(detail?.status ?? model?.status)}</dd><dt className="text-[#71809f]">Owner</dt><dd>{detail?.owner?.full_name ?? model?.owner ?? 'Unavailable'}</dd><dt className="text-[#71809f]">Runs</dt><dd>{detail?.run_count ?? model?.runs ?? 0}</dd><dt className="text-[#71809f]">Updated</dt><dd>{detail?.updated_at ? new Date(detail.updated_at).toLocaleString() : model?.updated ?? 'Unavailable'}</dd></dl>
+            {detail?.access?.length > 0 && <div className="mt-3 border-t pt-3"><h3 className="font-bold">Access</h3>{detail.access.map(item => <p className="mt-1 text-xs" key={item.user.id}>{item.user.full_name} · {item.role}</p>)}</div>}
+          </section>
+          <section className="mw-card flex flex-col gap-3">
+            <div><h2 className="text-base font-bold">Create draft version</h2><p className="mt-1 text-xs text-[#71809f]">Copies the selected version's structure. Draft versions cannot run yet.</p></div>
+            {!canEdit && <p className="text-xs text-[#71809f]">Your role is read-only for model registries.</p>}
+            <label className="grid gap-1 text-xs">Version label<input className="rounded border p-2" maxLength={30} value={versionLabel} onChange={event => setVersionLabel(event.target.value)} placeholder="Optional, e.g. v0.2" /></label>
+            {!selectedVersion && <label className="grid gap-1 text-xs">Basis<input className="rounded border p-2" required value={basis} onChange={event => setBasis(event.target.value)} placeholder="Required for the first version" /></label>}
+            <label className="grid gap-1 text-xs">Change summary<input className="rounded border p-2" value={changeSummary} onChange={event => setChangeSummary(event.target.value)} /></label>
+            {createError && <p role="alert" className="text-xs text-red-700">{createError}</p>}
+            <button className="model-open-button" disabled={!canEdit || createBusy || (!selectedVersion && !basis.trim())} onClick={() => void createDraftVersion()}><Plus size={15} />{createBusy ? 'Creating…' : 'Create draft version'}</button>
+          </section>
+          {selectedVersion && <section className="mw-card flex flex-col gap-3">
+            <div><h2 className="text-base font-bold">Draft notes</h2><p className="mt-1 text-xs text-[#71809f]">Only draft versions can be edited or archived here.</p></div>
+            {actionError && <p role="alert" className="text-xs text-red-700">{actionError}</p>}
+            {selectedVersion.status === 'draft' ? <>
+              <label className="grid gap-1 text-xs">Notes<textarea className="min-h-24 rounded border p-2" disabled={!editingNotes} value={notes} onChange={event => setNotesByVersion(current => ({ ...current, [selectedVersion.id]: event.target.value }))} /></label>
+              {canEdit && <div className="flex flex-wrap gap-2">{editingNotes ? <button className="model-open-button" disabled={saveBusy} onClick={() => void saveNotes()}><Save size={15} />Save notes</button> : <button className="model-open-button" onClick={() => setEditingNotes(true)}>Edit notes</button>}<button className="model-open-button" disabled={saveBusy} onClick={() => void archiveDraft()}><Archive size={15} />Archive draft</button></div>}
+            </> : <p className="text-xs text-[#71809f]">This version is {statusLabel(selectedVersion.status)}; edit and archive actions are unavailable.</p>}
+          </section>}
         </aside>
       </div>
-
-      <section className="mw-ready-banner mw-preflight-banner">
-        <span className="mw-banner-check"><Check size={22} /></span>
-        <div><strong>Projection setup requires preflight checks</strong><span>Confirm runnable formulas, mapped inforce data, pinned tables, scenario compatibility, and a monthly horizon.</span></div>
-        <button onClick={onCreateProjection}>Review and configure <ArrowRight size={16} /></button>
-      </section>
     </div>
   )
-}
-
-function Prerequisite({ state, title, detail }) {
-  const icon = state === 'ready' ? <CircleCheck size={19} /> : state === 'warning' ? <span className="mw-prerequisite-warning-icon">!</span> : state === 'optional' ? <span className="mw-prerequisite-optional-icon">i</span> : <span className="mw-prerequisite-review-icon">•</span>
-  const label = state === 'ready' ? 'Available' : state === 'warning' ? 'Review' : state === 'optional' ? 'Optional' : 'Confirm'
-  return <li className={`mw-prerequisite mw-prerequisite-${state}`}><span className="mw-prerequisite-icon">{icon}</span><span className="mw-prerequisite-copy"><b>{title}</b><small>{detail}</small></span><span className="mw-prerequisite-status">{label}</span></li>
 }

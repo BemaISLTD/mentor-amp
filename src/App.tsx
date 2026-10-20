@@ -18,6 +18,7 @@ import { ProjectionSetupProgress } from './pages/projection-setup-progress/Proje
 import { RunSetWorkflow } from './pages/run-set-workflow/RunSetWorkflow'
 import { MentorWorkspace } from './pages/mentor-workspace/MentorWorkspace'
 import { AdminSettings } from './pages/admin-settings/AdminSettings'
+import { DataManager } from './pages/data-manager/DataManager'
 import { ScreenErrorBoundary } from './components/ui/ScreenErrorBoundary'
 import type { Model } from './types'
 import { useState } from 'react'
@@ -36,6 +37,7 @@ function RoutedApp() {
   const [investigationSelectorActive, setInvestigationSelectorActive] = useState(true)
   const [selectedModel, setSelectedModel] = useState<Model | null>(null)
   const [startProjectionCreate, setStartProjectionCreate] = useState(false)
+  const [dataManagerCategory, setDataManagerCategory] = useState<'liability_inforce' | 'assumption_table' | 'factor_table' | 'scenario'>('liability_inforce')
   const [inputWorkflowPage, setInputWorkflowPage] = useState('Input Library')
   const isModelWorkspace = activeScreen === 'Models' && selectedModel !== null
   const startProjectionSetup = () => {
@@ -58,7 +60,15 @@ function RoutedApp() {
         : { ...current.draft, formulaConfirmed: false, scenarioCompatible: false },
     }))
   }
+  const openDataManager = (category: 'liability_inforce' | 'assumption_table' | 'factor_table' | 'scenario') => {
+    setDataManagerCategory(category)
+    setActiveScreen('Data Manager')
+  }
   const openInputWorkflow = (page: string) => {
+    if (page === 'Import Inforce') {
+      openDataManager('liability_inforce')
+      return
+    }
     setProjectionSetupActive(true)
     setStartProjectionCreate(true)
     setInputWorkflowPage(page)
@@ -119,7 +129,7 @@ function RoutedApp() {
         <Dashboard />
       ) : activeScreen === 'Models' ? (
         isModelWorkspace ? (
-          <ModelWorkspace model={selectedModel} onNotify={notify} onCreateProjection={startProjectionSetup} />
+          <ModelWorkspace key={selectedModel?.id} model={selectedModel} onNotify={notify} onCreateProjection={startProjectionSetup} onBack={() => setActiveScreen('Models')} />
         ) : (
           <ModelLibrary query={modelQuery} onNotify={notify} onOpenModel={openModel} />
         )
@@ -128,7 +138,7 @@ function RoutedApp() {
           <InputLibrary
             onNotify={notify}
             onNavigate={(page: string) => setInputWorkflowPage(page)}
-            onOpenInforceImport={() => setInputWorkflowPage('Import Inforce')}
+            onOpenInforceImport={() => openDataManager('liability_inforce')}
           />
         ) : (
           <InputWorkflowScreen
@@ -136,10 +146,13 @@ function RoutedApp() {
             onNavigate={(page: string) => setInputWorkflowPage(page)}
             onReturnToProjection={startProjectionSetup}
             onNotify={notify}
+            onOpenDataManager={openDataManager}
           />
         )
+      ) : activeScreen === 'Data Manager' ? (
+        <DataManager initialCategory={dataManagerCategory} />
       ) : activeScreen === 'Scenarios' ? (
-        <ScenarioAnalysis onNotify={notify} onOpenProjectionSetup={startProjectionSetup} />
+        <ScenarioAnalysis onNotify={notify} onOpenProjectionSetup={startProjectionSetup} onOpenDataManager={openDataManager} />
       ) : activeScreen === 'Formulas' ? (
         <FormulaLibrary query={formulaQuery} onNotify={notify} onLineageChange={setFormulaLineageActive} onDetailChange={setFormulaDetailActive} />
       ) : activeScreen === 'Runs' ? (
@@ -153,7 +166,7 @@ function RoutedApp() {
       ) : activeScreen === 'Investigate' ? (
         <ReserveInvestigation onNotify={notify} onViewChange={(view: string) => setInvestigationSelectorActive(view === 'selector')} />
       ) : activeScreen === 'Mentor' ? (
-        <MentorWorkspace onOpenInvestigate={() => setActiveScreen('Investigate')} onNotify={notify} />
+        <MentorWorkspace onOpenInvestigate={() => setActiveScreen('Investigate')} />
       ) : activeScreen === 'Admin / Settings' ? (
         <AdminSettings onNotify={notify} />
       ) : (

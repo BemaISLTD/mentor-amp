@@ -42,6 +42,7 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
   const [runId, setRunId] = useState('')
   const [baselineId, setBaselineId] = useState('')
   const [currentId, setCurrentId] = useState('')
+  const [approvedPartialRunIds, setApprovedPartialRunIds] = useState(() => new Set())
   const runsQuery = useApiQuery(`/v1/runs?project_id=${encodeURIComponent(projectId ?? '')}&limit=100`, 5000)
   const runs = runsQuery.data?.runs ?? []
   const runsWithResults = runs.filter((run) => run.results_available)
@@ -50,9 +51,18 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
   const currentRun = runsWithResults.find((run) => run.id === currentId) ?? runsWithResults[0]
   const selectedBaselineId = baselineRun?.id ?? ''
   const selectedCurrentId = currentRun?.id ?? ''
-  const summaryQuery = useApiQuery(selectedRun ? `/v1/runs/${selectedRun.id}/summary` : null, 5000)
-  const aggregateQuery = useApiQuery(selectedRun ? `/v1/runs/${selectedRun.id}/aggregates?group_by=projection_year` : null, 5000)
-  const comparisonQuery = useApiQuery(selectedBaselineId && selectedCurrentId && selectedBaselineId !== selectedCurrentId ? `/v1/comparisons?baseline_run_id=${encodeURIComponent(selectedBaselineId)}&current_run_id=${encodeURIComponent(selectedCurrentId)}` : null)
+  const selectedIsPartial = selectedRun?.status === 'partial_success'
+  const selectedPartialApproved = Boolean(selectedRun && approvedPartialRunIds.has(selectedRun.id))
+  const selectedPartialNeedsApproval = Boolean(selectedIsPartial && !selectedPartialApproved)
+  const comparisonRuns = [baselineRun, currentRun].filter(Boolean)
+  const partialComparisonRuns = comparisonRuns.filter((run) => run.status === 'partial_success')
+  const unapprovedComparisonRuns = partialComparisonRuns.filter((run) => !approvedPartialRunIds.has(run.id))
+  const comparisonNeedsApproval = unapprovedComparisonRuns.length > 0
+  const comparisonUsesPartial = partialComparisonRuns.length > 0 && !comparisonNeedsApproval
+  const selectedIncludePartial = selectedIsPartial && selectedPartialApproved
+  const summaryQuery = useApiQuery(selectedRun && !selectedPartialNeedsApproval ? `/v1/runs/${selectedRun.id}/summary${selectedIncludePartial ? '?include_partial=true' : ''}` : null, 5000)
+  const aggregateQuery = useApiQuery(selectedRun && !selectedPartialNeedsApproval ? `/v1/runs/${selectedRun.id}/aggregates?group_by=projection_year${selectedIncludePartial ? '&include_partial=true' : ''}` : null, 5000)
+  const comparisonQuery = useApiQuery(selectedBaselineId && selectedCurrentId && selectedBaselineId !== selectedCurrentId && !comparisonNeedsApproval ? `/v1/comparisons?baseline_run_id=${encodeURIComponent(selectedBaselineId)}&current_run_id=${encodeURIComponent(selectedCurrentId)}${comparisonUsesPartial ? '&include_partial=true' : ''}` : null)
   const summary = summaryQuery.data
   const aggregate = aggregateQuery.data
   const comparison = comparisonQuery.data
@@ -66,14 +76,21 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
     setView('Compare results')
     onCompareChange?.(true)
   }
+  const approvePartialRuns = (runIds) => {
+    setApprovedPartialRunIds((current) => new Set([...current, ...runIds]))
+  }
   const scenarioName = (run) => run?.scenario?.name ?? run?.scenario_name ?? '—'
-  const statusText = (value) => ({ success: 'Completed', partial_success: 'Partial success', failed: 'Failed', running: 'Running', queued: 'Queued' }[value] ?? value ?? '—')
+  const statusText = (value) => ({ success: 'Completed', partial_success: 'Partial success', failed: 'Failed', running: 'Running', pending: 'Pending', cancelled: 'Cancelled' }[value] ?? value ?? '—')
   const formatValue = (value, unit) => value == null ? '—' : (unit === 'count' ? new Intl.NumberFormat('en-US').format(value) : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value))
   const exportResults = async () => {
     if (!selectedRun) { onNotify('Select a run with results before exporting.'); return }
+    if (selectedRun.status === 'partial_success' && !selectedPartialApproved) { onNotify('Confirm that you want to export incomplete results first.'); return }
     try {
-      const response = await fetch(`${baseUrl}/v1/runs/${selectedRun.id}/export.csv?group_by=projection_year`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      if (!response.ok) throw new Error(`Export failed (${response.status}).`)
+      const response = await fetch(`${baseUrl}/v1/runs/${selectedRun.id}/export.csv?group_by=projection_year${selectedIncludePartial ? '&include_partial=true' : ''}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!response.ok) throw new Error(response.status === 403
+        ? 'You do not have permission to export this run. Contact a project administrator if you need access.'
+        : `Export failed (${response.status}).`)
+      const completeHeader = response.headers.get('X-MentorAmp-Complete')
       const file = await response.blob()
       const url = URL.createObjectURL(file)
       const link = document.createElement('a')
@@ -81,7 +98,9 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
       link.download = `${(selectedRun.name || selectedRun.id).replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}.csv`
       link.click()
       URL.revokeObjectURL(url)
-      onNotify('Backend results CSV downloaded')
+      onNotify(completeHeader?.toLowerCase() === 'false'
+        ? 'Backend results CSV downloaded; the backend marked the data incomplete.'
+        : 'Backend results CSV downloaded')
     } catch (error) { onNotify(error instanceof Error ? error.message : 'Could not export run results') }
   }
 
@@ -103,6 +122,9 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
         </div>
       </nav>
 
+      {selectedIsPartial && <section className="result-panel rounded-[10px] bg-[#fff7df] p-4" role="alert"><b>This run is incomplete.</b><p>Some policies did not finish. {selectedPartialApproved ? 'Incomplete results are included in the displayed summary and aggregates.' : 'Results are hidden until you explicitly choose to show incomplete results.'}</p>{!selectedPartialApproved && <button className="button button-primary" onClick={() => approvePartialRuns([selectedRun.id])}>Show incomplete results</button>}</section>}
+      {(view === 'Compare setup' || view === 'Compare results') && partialComparisonRuns.length > 0 && <section className="result-panel rounded-[10px] bg-[#fff7df] p-4" role="alert"><b>This comparison includes incomplete run data.</b><p>{unapprovedComparisonRuns.length ? `Approve incomplete results for ${unapprovedComparisonRuns.map((run) => run.name || run.id).join(', ')} before loading the comparison.` : 'Incomplete results are included in this comparison.'}</p>{unapprovedComparisonRuns.length > 0 && <button className="button button-primary" onClick={() => approvePartialRuns(unapprovedComparisonRuns.map((run) => run.id))}>Show incomplete results</button>}</section>}
+
       {(runsQuery.loading || runsQuery.error || (!runsQuery.loading && !runsWithResults.length)) && (
         <section className="result-panel rounded-[10px] bg-white p-4" role={runsQuery.error ? 'alert' : undefined}>
           {runsQuery.loading && 'Loading live runs…'}
@@ -118,10 +140,10 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
             <>
               {summaryQuery.error && <section className="result-panel rounded-[10px] bg-white p-4" role="alert">Could not load the selected run summary: {summaryQuery.error.message}</section>}
               {aggregateQuery.error && <section className="result-panel rounded-[10px] bg-white p-4" role="alert">Could not load the selected run aggregates: {aggregateQuery.error.message}</section>}
-              <ExplorerView metric={metric} setMetric={setMetric} run={selectedRun} summary={summary} aggregate={aggregate} summaryLoading={summaryQuery.loading} aggregateLoading={aggregateQuery.loading} comparison={comparison} formatValue={formatValue} onNotify={onNotify} />
+              <ExplorerView metric={metric} setMetric={setMetric} run={selectedRun} summary={summary} aggregate={aggregate} summaryLoading={summaryQuery.loading} aggregateLoading={aggregateQuery.loading} comparison={comparison} formatValue={formatValue} onNotify={onNotify} includePartial={!selectedPartialNeedsApproval} />
             </>
           )}
-          {view === 'Run History' && <RunHistoryView runs={runs} loading={runsQuery.loading} onSelect={(run) => { setRunId(run.id); setView('Results Explorer') }} scenarioName={scenarioName} statusText={statusText} onNotify={onNotify} />}
+          {view === 'Run History' && <RunHistoryView projectId={projectId} onSelect={(run) => { setRunId(run.id); setView('Results Explorer') }} scenarioName={scenarioName} statusText={statusText} />}
           {view === 'Compare setup' && (
             <CompareRunsSetup
               runs={runsWithResults}
@@ -166,7 +188,7 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
     </div>
   )
 }
-function ExplorerView({ metric, setMetric, run, summary, aggregate, summaryLoading, aggregateLoading, comparison, formatValue, onNotify }) {
+function ExplorerView({ metric, setMetric, run, summary, aggregate, summaryLoading, aggregateLoading, comparison, formatValue, onNotify, includePartial }) {
   const variables = aggregate?.variables ?? []
   const needle = metric.toLowerCase().replace(/[^a-z]/g, '')
   const selectedVariable = variables.find((item) => `${item.name} ${item.display_name}`.toLowerCase().replace(/[^a-z]/g, '').includes(needle)) ?? variables[0]
@@ -180,6 +202,7 @@ function ExplorerView({ metric, setMetric, run, summary, aggregate, summaryLoadi
         <SmallMetric icon={<GitBranch size={25} />} label="Trace coverage" value={summary?.trace?.captured ? `${summary.trace.captured_policy_count ?? 0}` : '—'} detail={summary?.trace?.mode ?? (summaryLoading ? 'Loading trace status' : 'Not captured')} />
       </section>
       <ProjectionCard metric={metric} setMetric={setMetric} run={run} series={series} selectedVariable={selectedVariable} loading={aggregateLoading} formatValue={number} onNotify={onNotify} />
+      {run && <PolicyResultsView key={run.id} run={run} includePartial={includePartial} />}
       <DriverContribution summary={summary} comparison={comparison} formatValue={formatValue} />
     </>
   )
@@ -370,11 +393,80 @@ function ExploreLinks({ setView, onNotify }) {
   )
 }
 
-function RunHistoryView({ runs, loading, onSelect, scenarioName, statusText, onNotify }) {
+function PolicyResultsView({ run, includePartial }) {
+  const [draftFilters, setDraftFilters] = useState({ policyId: '', variable: '', monthFrom: '', monthTo: '' })
+  const [filters, setFilters] = useState(draftFilters)
+  const [offset, setOffset] = useState(0)
+  const params = new URLSearchParams({ limit: '50', offset: String(offset) })
+  if (filters.policyId.trim()) params.set('policy_id', filters.policyId.trim())
+  if (filters.variable.trim()) params.set('variable', filters.variable.trim())
+  if (filters.monthFrom !== '') params.set('month_from', filters.monthFrom)
+  if (filters.monthTo !== '') params.set('month_to', filters.monthTo)
+  if (includePartial && run.status === 'partial_success') params.set('include_partial', 'true')
+  const resultQuery = useApiQuery(run.id && includePartial ? `/v1/runs/${encodeURIComponent(run.id)}/results?${params.toString()}` : null)
+  const rows = resultQuery.data?.rows ?? []
+  const total = resultQuery.data?.total ?? 0
+  const pageSize = resultQuery.data?.limit ?? 50
+  const applyFilters = event => {
+    event.preventDefault()
+    setOffset(0)
+    setFilters({ ...draftFilters })
+  }
+
+  return (
+    <section className="result-panel rounded-[10px] bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3"><div><h2 className="text-base font-bold">Policy-level results</h2><p className="text-xs text-[#71809f]">Paged result rows from the selected backend run.</p></div><small>{total.toLocaleString()} rows</small></div>
+      {run.status === 'partial_success' && !includePartial && <p role="status">Policy rows are hidden until you choose “Show incomplete results” above.</p>}
+      <form className="result-row-filters" onSubmit={applyFilters}>
+        <label>Policy ID<input value={draftFilters.policyId} onChange={event => setDraftFilters(current => ({ ...current, policyId: event.target.value }))} /></label>
+        <label>Variable<input value={draftFilters.variable} onChange={event => setDraftFilters(current => ({ ...current, variable: event.target.value }))} /></label>
+        <label>Month from<input type="number" min="0" value={draftFilters.monthFrom} onChange={event => setDraftFilters(current => ({ ...current, monthFrom: event.target.value }))} /></label>
+        <label>Month to<input type="number" min="0" value={draftFilters.monthTo} onChange={event => setDraftFilters(current => ({ ...current, monthTo: event.target.value }))} /></label>
+        <button type="submit">Apply row filters</button>
+      </form>
+      {resultQuery.loading && <p role="status">Loading policy rows…</p>}
+      {resultQuery.error && <p role="alert">Could not load policy rows: {resultQuery.error.message}</p>}
+      {resultQuery.data && <p className="text-xs text-[#71809f]">Backend completeness: {resultQuery.data.complete ? 'complete' : 'incomplete'} · Showing {rows.length ? offset + 1 : 0}–{offset + rows.length} of {total}</p>}
+      {!resultQuery.loading && !resultQuery.error && includePartial && rows.length > 0 && <div className="result-row-table-wrap"><table><thead><tr><th>Policy</th><th>Month</th><th>Year</th><th>Period end</th><th>Variable</th><th>Value</th><th>Unit</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.policy_id}-${row.month}-${row.variable}-${index}`}><td>{row.policy_id}</td><td>{row.month}</td><td>{row.projection_year}</td><td>{row.period_end_date}</td><td>{row.variable}</td><td>{row.value == null ? '—' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(row.value)}</td><td>{row.unit}</td></tr>)}</tbody></table></div>}
+      {!resultQuery.loading && !resultQuery.error && includePartial && resultQuery.data && !rows.length && <p>No policy rows match the current filters.</p>}
+      {includePartial && total > pageSize && <div className="result-row-pagination"><button disabled={offset === 0 || resultQuery.loading} onClick={() => setOffset(Math.max(0, offset - pageSize))}>Previous page</button><span>Page {Math.floor(offset / pageSize) + 1} of {Math.ceil(total / pageSize)}</span><button disabled={offset + pageSize >= total || resultQuery.loading} onClick={() => setOffset(offset + pageSize)}>Next page</button></div>}
+    </section>
+  )
+}
+
+function RunHistoryView({ projectId, onSelect, scenarioName, statusText }) {
+  const [draftFilters, setDraftFilters] = useState({ status: '', projectionSetId: '', modelVersionId: '', runSetId: '' })
+  const [filters, setFilters] = useState(draftFilters)
+  const params = new URLSearchParams({ project_id: projectId ?? '', limit: '100' })
+  if (filters.status) params.set('status', filters.status)
+  if (filters.projectionSetId.trim()) params.set('projection_set_id', filters.projectionSetId.trim())
+  if (filters.modelVersionId.trim()) params.set('model_version_id', filters.modelVersionId.trim())
+  if (filters.runSetId.trim()) params.set('run_set_id', filters.runSetId.trim())
+  const historyQuery = useApiQuery(projectId ? `/v1/runs?${params.toString()}` : null, 5000)
+  const runs = historyQuery.data?.runs ?? []
+  const applyFilters = event => {
+    event.preventDefault()
+    setFilters({ ...draftFilters })
+  }
+  const clearFilters = () => {
+    const empty = { status: '', projectionSetId: '', modelVersionId: '', runSetId: '' }
+    setDraftFilters(empty)
+    setFilters(empty)
+  }
+
   return (
     <section className="result-panel rounded-[10px] bg-white p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">Run History</h2><p className="text-sm text-[#71809f]">Results remain linked to their model and execution snapshots.</p></div><button className="result-action" onClick={() => onNotify('Run-history filtering is not available yet.') }><Search size={16} />Filter runs</button></div>
-      <div className="flex flex-col">{loading && <p className="py-4">Loading backend run history…</p>}{runs.map((run) => <div className="history-row grid grid-cols-[1.1fr_1fr_1fr_120px_110px] items-center gap-3 py-4 max-[760px]:grid-cols-2" key={run.id}><span><b>{run.name}</b><small>{run.projection_set?.name ?? run.projection_set_name ?? run.id}</small></span><span className="max-[760px]:hidden">{scenarioName(run)}</span><span className="max-[760px]:hidden">{run.valuation_date ?? '—'}</span><StatusBadge status={statusText(run.status)} /><button className="history-open" disabled={!run.results_available} onClick={() => onSelect(run)}>{run.results_available ? 'Open results' : 'Results unavailable'} <ArrowRight size={14} /></button></div>)}{!loading && !runs.length && <p className="py-4">No backend runs are available for this project.</p>}</div>
+      <div className="mb-4"><h2 className="text-lg font-bold">Run History</h2><p className="text-sm text-[#71809f]">Filter using backend run status and ID fields.</p></div>
+      <form className="result-row-filters result-history-filters" onSubmit={applyFilters}>
+        <label>Status<select value={draftFilters.status} onChange={event => setDraftFilters(current => ({ ...current, status: event.target.value }))}><option value="">All statuses</option>{['pending', 'running', 'success', 'partial_success', 'failed', 'cancelled'].map(status => <option key={status} value={status}>{statusText(status)}</option>)}</select></label>
+        <label>Projection Set ID<input value={draftFilters.projectionSetId} onChange={event => setDraftFilters(current => ({ ...current, projectionSetId: event.target.value }))} /></label>
+        <label>Model version ID<input value={draftFilters.modelVersionId} onChange={event => setDraftFilters(current => ({ ...current, modelVersionId: event.target.value }))} /></label>
+        <label>Run Set ID<input value={draftFilters.runSetId} onChange={event => setDraftFilters(current => ({ ...current, runSetId: event.target.value }))} /></label>
+        <button type="submit">Apply filters</button><button type="button" onClick={clearFilters}>Clear</button>
+      </form>
+      {historyQuery.error && <p role="alert">Could not load run history: {historyQuery.error.message}</p>}
+      <div className="flex flex-col">{historyQuery.loading && <p className="py-4">Loading backend run history…</p>}{runs.map((run) => <div className="history-row grid grid-cols-[1.1fr_1fr_1fr_120px_110px] items-center gap-3 py-4 max-[760px]:grid-cols-2" key={run.id}><span><b>{run.name}</b><small>{run.projection_set?.name ?? run.projection_set_name ?? run.id}</small></span><span className="max-[760px]:hidden">{scenarioName(run)}</span><span className="max-[760px]:hidden">{run.valuation_date ?? '—'}</span><StatusBadge status={statusText(run.status)} /><button className="history-open" disabled={!run.results_available} onClick={() => onSelect(run)}>{run.results_available ? 'Open results' : 'Results unavailable'} <ArrowRight size={14} /></button></div>)}{!historyQuery.loading && !historyQuery.error && !runs.length && <p className="py-4">No backend runs match these filters.</p>}</div>
+      {historyQuery.data && <small className="text-xs text-[#71809f]">Showing {runs.length} of {historyQuery.data.total} runs.</small>}
     </section>
   )
 }

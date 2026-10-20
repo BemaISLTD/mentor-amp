@@ -7,84 +7,17 @@ import {
   Filter,
   Grid2X2,
   MoreVertical,
+  Plus,
   Star,
   UserRound,
   UsersRound,
 } from 'lucide-react'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useApi } from '../../api/ApiProvider'
+import { canImportData } from '../../api/permissions'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
 import './model-library.css'
-
-const modelRecords = [
-  {
-    name: 'MYGA Reserve Model',
-    id: 'mdl_01HR7Z2Q8Y9KJ2M556A1B3C4D',
-    version: 'v3.2',
-    product: 'MYGA',
-    basis: 'GAAP Reserve Base',
-    status: 'Validated',
-    updated: 'May 12, 2025',
-    time: '10:42 AM',
-    owner: 'Andrew Johnson',
-    initials: 'AJ',
-  },
-  {
-    name: 'FIA VM-21 Stochastic',
-    id: 'mdl_02FK8C4P1M7J6R3V5N0A9D2B',
-    version: 'v3.1',
-    product: 'FIA',
-    basis: 'VM-21',
-    status: 'Validated',
-    updated: 'Apr 28, 2025',
-    time: '2:15 PM',
-    owner: 'Emily Chen',
-    initials: 'EC',
-  },
-  {
-    name: 'RILA Embedded Value',
-    id: 'mdl_03GX2N7W8D1P5Q9L4J6F0C3A',
-    version: 'v2.4',
-    product: 'RILA',
-    basis: 'GAAP',
-    status: 'Needs review',
-    updated: 'Mar 19, 2025',
-    time: '9:31 AM',
-    owner: 'Michael Patel',
-    initials: 'MP',
-  },
-  {
-    name: 'DI Reserve Model',
-    id: 'mdl_04HT9B1K2M6R8W3J5P7Q0D4N',
-    version: 'v3.1',
-    product: 'DI',
-    basis: 'Statutory',
-    status: 'Draft',
-    updated: 'Mar 05, 2025',
-    time: '4:08 PM',
-    owner: 'Sarah Williams',
-    initials: 'SW',
-  },
-  {
-    name: 'CAT Model – Q4 2024',
-    id: 'mdl_05NV3C9F1J7K2R8W4P6Q0B5D',
-    version: 'v1.0',
-    product: 'CAT',
-    basis: 'GAAP',
-    status: 'Draft',
-    updated: 'Jan 15, 2025',
-    time: '11:20 AM',
-    owner: 'Daniel Kim',
-    initials: 'DK',
-  },
-]
-
-const tabs = [
-  { label: 'All', count: 5 },
-  { label: 'Owned', count: 4 },
-  { label: 'Shared', count: 8 },
-]
 
 const ownerColors = {
   AJ: 'bg-[#8d6847]',
@@ -96,7 +29,8 @@ const ownerColors = {
 
 export function ModelLibrary({ query, onNotify, onOpenModel }) {
   const { projectId } = useWorkspace()
-  const { user } = useApi()
+  const { request, user } = useApi()
+  const canCreateModel = canImportData(user?.roles ?? [])
   const catalogQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/models` : null)
   const apiModels = catalogQuery.data?.models ?? []
   const modelRecords = apiModels.map((item) => {
@@ -105,7 +39,7 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
     return {
       id: item.id, name: item.name, version: item.current_version?.version_label || '—',
       basis: item.current_version?.basis || '—', product: item.product_code || '—',
-      status: item.status === 'needs_review' ? 'Needs review' : item.status === 'validated' ? 'Validated' : 'Draft',
+      status: item.status === 'needs_review' ? 'needs_review' : item.status === 'validated' ? 'validated' : item.status === 'approved' ? 'approved' : item.status === 'rejected' ? 'rejected' : item.status === 'superseded' ? 'superseded' : item.status === 'published' ? 'published' : 'draft',
       updated: timestamp && !Number.isNaN(timestamp.valueOf()) ? timestamp.toLocaleDateString() : '—',
       time: timestamp && !Number.isNaN(timestamp.valueOf()) ? timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       owner, initials: owner.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '??',
@@ -123,6 +57,12 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
   const [view, setView] = useState('list')
   const [favorites, setFavorites] = useState([])
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newProductCode, setNewProductCode] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState('')
 
   const normalizedQuery = query.trim().toLowerCase()
   const visibleModels = modelRecords
@@ -150,6 +90,30 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
     )
   }
 
+  const createModel = async event => {
+    event.preventDefault()
+    if (!canCreateModel || !projectId || createBusy) return
+    setCreateBusy(true)
+    setCreateError('')
+    try {
+      const created = await request(`/v1/projects/${encodeURIComponent(projectId)}/models`, {
+        method: 'POST',
+        body: JSON.stringify({ name: newName.trim(), product_code: newProductCode.trim(), description: newDescription.trim() || null }),
+      })
+      catalogQuery.refetch()
+      setCreateOpen(false)
+      setNewName('')
+      setNewProductCode('')
+      setNewDescription('')
+      onNotify(`Model ${created.name} created. Add its first draft version from Model detail.`)
+      onOpenModel({ id: created.id, name: created.name, product: created.product_code, status: created.status, owner: user?.full_name ?? 'You' })
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Could not create the model.')
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
   return (
     <div className="model-library flex flex-col gap-4">
       <div className="model-library-tabs flex min-h-12 items-center justify-between gap-4 max-[760px]:items-start max-[760px]:flex-col max-[760px]:gap-2">
@@ -168,6 +132,7 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
         </div>
 
         <div className="model-filter-actions flex items-center gap-2.5 max-[760px]:w-full max-[760px]:justify-end">
+          {canCreateModel && <button className="model-open-button" onClick={() => setCreateOpen(true)}><Plus size={15} />Create model</button>}
           <label className="model-product-filter flex min-w-[206px] items-center gap-2 max-[760px]:min-w-0">
             <span className="sr-only">Filter by product</span>
             <select
@@ -202,10 +167,13 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
             >
-              <option>All statuses</option>
-              <option>Validated</option>
-              <option>Needs review</option>
-              <option>Draft</option>
+              <option value="All statuses">All statuses</option>
+              <option value="validated">Validated</option>
+              <option value="needs_review">Needs review</option>
+              <option value="draft">Draft</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="superseded">Superseded</option>
             </select>
           </label>
         </div>
@@ -288,6 +256,16 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
           {visibleModels.length} of {counts.all} models · select Open model to enter the architecture workspace
         </p>
       </section>
+      {createOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4" onClick={() => setCreateOpen(false)}>
+        <form className="flex w-full max-w-lg flex-col gap-3 rounded-xl bg-white p-5 shadow-xl" onSubmit={createModel} onClick={event => event.stopPropagation()}>
+          <div><h2 className="text-lg font-bold text-[#101b37]">Create model</h2><p className="text-xs text-[#71809f]">Creates an empty model shell. Create a draft version next.</p></div>
+          <label className="grid gap-1 text-xs">Name<input required maxLength={255} value={newName} onChange={event => setNewName(event.target.value)} /></label>
+          <label className="grid gap-1 text-xs">Product code<input required maxLength={50} value={newProductCode} onChange={event => setNewProductCode(event.target.value)} placeholder="e.g. SPIA" /></label>
+          <label className="grid gap-1 text-xs">Description<textarea value={newDescription} onChange={event => setNewDescription(event.target.value)} /></label>
+          {createError && <p role="alert" className="text-xs text-red-700">{createError}</p>}
+          <div className="flex justify-end gap-2"><button type="button" className="model-open-button" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit" className="model-open-button" disabled={createBusy || !newName.trim() || !newProductCode.trim()}>{createBusy ? 'Creating…' : 'Create model'}</button></div>
+        </form>
+      </div>}
     </div>
   )
 }

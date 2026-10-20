@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Clock3,
   Copy,
-  CircleCheck,
   Database,
   Download,
   FileUp,
@@ -23,6 +22,8 @@ import {
   X,
 } from 'lucide-react'
 import { useApp } from '../../context/useApp'
+import { useApi } from '../../api/ApiProvider'
+import { canImportData } from '../../api/permissions'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
 import './scenario-analysis.css'
@@ -30,15 +31,18 @@ import './scenario-generator-library.css'
 
 const validationChecks = [
   { title: 'Scenario status', detail: 'Read from the project scenario registry' },
-  { title: 'Validation results', detail: 'Not provided by backend M1' },
+  { title: 'Validation results', detail: 'Available when the backend reports a validation outcome' },
   { title: 'Scenario comparison', detail: 'Available for saved scenarios' },
-  { title: 'Generation and import', detail: 'Not available in backend M1' },
+  { title: 'Generation and import', detail: 'Handled outside this screen when the backend exposes those actions' },
 ]
+const EMPTY_SCENARIO_SETS = []
 
-export function ScenarioAnalysis({ onNotify, onOpenProjectionSetup }) {
+export function ScenarioAnalysis({ onNotify, onOpenProjectionSetup, onOpenDataManager }) {
   const { projectId } = useWorkspace()
+  const { user } = useApi()
+  const importAllowed = canImportData(user?.roles ?? [])
   const scenarioQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/scenario-sets` : null, 8000)
-  const scenarioSets = scenarioQuery.data?.scenario_sets ?? []
+  const scenarioSets = scenarioQuery.data?.scenario_sets ?? EMPTY_SCENARIO_SETS
   const backendScenarios = useMemo(() => scenarioSets.flatMap(group => (group.scenarios ?? []).map(scenario => ({ ...scenario, scenario_set_name: group.name }))), [scenarioSets])
   const [view, setView] = useState('analysis')
   const [baseScenarioReturnView, setBaseScenarioReturnView] = useState('analysis')
@@ -56,11 +60,11 @@ export function ScenarioAnalysis({ onNotify, onOpenProjectionSetup }) {
     setView('base')
   }
   if (view === 'base') return <BaseScenarioPage backLabel={baseScenarioReturnView === 'analysis' ? 'Scenarios / Scenario analysis' : 'Scenarios / Generator library'} onBack={() => setView(baseScenarioReturnView)} onNotify={onNotify} onAttach={onOpenProjectionSetup} scenario={selectedScenario} scenarioItems={backendScenarios} />
-  if (view === 'analysis') return <ScenarioGeneratorWorkspace scenarioItems={backendScenarios} selectedScenario={selectedScenario} scenarioLoading={scenarioQuery.loading} scenarioError={scenarioQuery.error} onSelectScenario={setSelectedScenarioId} onNotify={onNotify} onOpenGeneratorLibrary={() => setView('library')} onViewBase={openBaseScenario} />
-  return <ScenarioGeneratorLibrary libraryGenerators={libraryGenerators} onNotify={onNotify} onViewBase={openBaseScenario} onOpenAnalysis={() => setView('analysis')} />
+  if (view === 'analysis') return <ScenarioGeneratorWorkspace scenarioItems={backendScenarios} selectedScenario={selectedScenario} scenarioLoading={scenarioQuery.loading} scenarioError={scenarioQuery.error} onSelectScenario={setSelectedScenarioId} onNotify={onNotify} importAllowed={importAllowed} onOpenDataManager={onOpenDataManager} onOpenGeneratorLibrary={() => setView('library')} onViewBase={openBaseScenario} />
+  return <ScenarioGeneratorLibrary libraryGenerators={libraryGenerators} onNotify={onNotify} onViewBase={openBaseScenario} onOpenAnalysis={() => setView('analysis')} importAllowed={importAllowed} onOpenDataManager={onOpenDataManager} />
 }
 
-function ScenarioGeneratorWorkspace({ scenarioItems, selectedScenario, scenarioLoading, scenarioError, onSelectScenario, onNotify, onOpenGeneratorLibrary, onViewBase }) {
+function ScenarioGeneratorWorkspace({ scenarioItems, selectedScenario, scenarioLoading, scenarioError, onSelectScenario, onNotify, importAllowed, onOpenDataManager, onOpenGeneratorLibrary, onViewBase }) {
   const [metric, setMetric] = useState('Interest rate (short rate)')
   const [horizon, setHorizon] = useState('20 years')
   const pathCount = selectedScenario?.path_count === undefined || selectedScenario?.path_count === null ? '—' : Number(selectedScenario.path_count).toLocaleString()
@@ -68,7 +72,7 @@ function ScenarioGeneratorWorkspace({ scenarioItems, selectedScenario, scenarioL
   const [comparisonOpen, setComparisonOpen] = useState(false)
 
   const downloadScenarioSet = () => {
-    onNotify('Scenario-set export is not available in backend M1.')
+    onNotify('Scenario-set export is not exposed by the current backend contract for this screen.')
   }
 
   return (
@@ -78,9 +82,10 @@ function ScenarioGeneratorWorkspace({ scenarioItems, selectedScenario, scenarioL
         pathCount={pathCount}
         seed={seed}
         generatorVersion={selectedScenario?.version_label || selectedScenario?.scenario_set_name || 'Scenario registry'}
-        onImport={() => onNotify('Scenario import is not available in backend M1.')}
+        importAllowed={importAllowed}
+        onImport={() => onOpenDataManager?.('scenario')}
         onGenerate={() => {
-          onNotify('Scenario generation is not available in backend M1. Opening the generator library instead.')
+          onNotify('Scenario generation remains outside this screen; opening the generator library instead.')
           onOpenGeneratorLibrary()
         }}
       />
@@ -107,8 +112,8 @@ function ScenarioGeneratorWorkspace({ scenarioItems, selectedScenario, scenarioL
         </main>
 
         <ValidationPanel
+          key={selectedScenario?.id ?? 'no-scenario'}
           selectedScenario={selectedScenario}
-          horizon={horizon}
           pathCount={pathCount}
           seed={seed}
           onDownload={downloadScenarioSet}
@@ -126,7 +131,7 @@ function ScenarioGeneratorWorkspace({ scenarioItems, selectedScenario, scenarioL
   )
 }
 
-function ScenarioGeneratorBanner({ horizon, pathCount, seed, generatorVersion, onImport, onGenerate }) {
+function ScenarioGeneratorBanner({ horizon, pathCount, seed, generatorVersion, importAllowed, onImport, onGenerate }) {
   return (
     <section className="scenario-generator-banner grid grid-cols-[minmax(0,1fr)_minmax(480px,750px)] items-center gap-8 rounded-[12px] px-7 py-6 max-[1120px]:grid-cols-1 max-[1120px]:gap-5 max-[600px]:px-4 max-[600px]:py-5">
       <div className="flex min-w-0 items-center gap-5 max-[600px]:items-start">
@@ -134,7 +139,7 @@ function ScenarioGeneratorBanner({ horizon, pathCount, seed, generatorVersion, o
         <div className="min-w-0">
           <h2>Scenario Generator</h2>
           <span className="scenario-generator-version">{generatorVersion}</span>
-          <p>Backend M1 supports saved scenario retrieval and comparison. Scenario generation and import are not available yet.</p>
+          <p>Saved scenario sets are retrieved from the project registry and compared using backend data. Generator creation and import remain backend-driven when those actions are exposed.</p>
         </div>
       </div>
 
@@ -148,9 +153,9 @@ function ScenarioGeneratorBanner({ horizon, pathCount, seed, generatorVersion, o
           <button className="scenario-generate-button" onClick={onGenerate}>
             <Activity size={20} />Generate scenarios
           </button>
-          <button className="scenario-import-button" onClick={onImport}>
+          {importAllowed && <button className="scenario-import-button" onClick={onImport}>
             <FileUp size={20} />Import scenario
-          </button>
+          </button>}
         </div>
       </div>
     </section>
@@ -279,7 +284,7 @@ function ScenarioSetList({ scenarioItems, selectedScenarioId, loading, error, on
       <h2 className="scenario-section-label">Scenario sets</h2>
       {loading && <p>Loading saved scenarios…</p>}
       {error && <p>Could not load saved scenarios: {error.message}</p>}
-      {!loading && !error && cards.length === 0 && <p>No saved scenarios are available for this project. Backend M1 does not support scenario creation.</p>}
+      {!loading && !error && cards.length === 0 && <p>No saved scenarios are available for this project yet. Create or import a scenario from the backend-supported workflow when one is ready.</p>}
       <div className="scenario-set-grid grid grid-cols-3 gap-3 max-[760px]:grid-cols-2 max-[520px]:grid-cols-1">
         {cards.map((scenario) => (
           <ScenarioSetCard
@@ -321,7 +326,9 @@ function ScenarioSetCard({ scenario, selected, onSelect }) {
   )
 }
 
-function ValidationPanel({ selectedScenario, horizon, pathCount, seed, onDownload, onNotify }) {
+function ValidationPanel({ selectedScenario, pathCount, seed, onDownload, onNotify }) {
+  const scenarioDetailQuery = useApiQuery(selectedScenario?.id ? `/v1/scenarios/${encodeURIComponent(selectedScenario.id)}` : null)
+  const scenarioDetail = scenarioDetailQuery.data
   const rows = validationChecks.map((check, index) => ({
     ...check,
     detail: index === 0 ? (selectedScenario?.status || 'No scenario selected') : check.detail,
@@ -348,6 +355,24 @@ function ValidationPanel({ selectedScenario, horizon, pathCount, seed, onDownloa
         <div><dt>Horizon</dt><dd>{selectedScenario?.horizon || notReported}</dd></div>
         <div><dt>Random seed</dt><dd>{selectedScenario?.seed ?? seed}</dd></div>
       </dl>
+
+      <section className="scenario-detail-card">
+        <h3>Selected scenario detail</h3>
+        {scenarioDetailQuery.loading && <p>Loading scenario detail…</p>}
+        {scenarioDetailQuery.error && <p role="alert">Could not load scenario detail: {scenarioDetailQuery.error.message}</p>}
+        {scenarioDetail && <>
+          <dl className="scenario-provenance-list">
+            <div><dt>Scenario set</dt><dd>{scenarioDetail.set?.name ?? '—'}</dd></div>
+            <div><dt>Type / version</dt><dd>{scenarioDetail.scenario_type} · {scenarioDetail.version_label}</dd></div>
+            <div><dt>Fingerprint</dt><dd>{scenarioDetail.fingerprint}</dd></div>
+            <div><dt>Source</dt><dd>{scenarioDetail.source_label ?? '—'}</dd></div>
+          </dl>
+          <h4>Overrides ({scenarioDetail.overrides?.length ?? 0})</h4>
+          {(scenarioDetail.overrides ?? []).map((override, index) => <p className="scenario-detail-row" key={`${override.target_variable}-${index}`}><b>{override.target_variable}</b><span>{override.operation} {override.value} {override.unit ?? ''} · periods {override.applies_from_period ?? 'all'}–{override.applies_to_period ?? 'all'}</span></p>)}
+          <h4>Projection Set consumers ({scenarioDetail.consumers?.projection_sets?.length ?? 0})</h4>
+          {(scenarioDetail.consumers?.projection_sets ?? []).map(item => <p className="scenario-detail-row" key={item.id}><b>{item.name}</b><span>{item.id}</span></p>)}
+        </>}
+      </section>
 
       <button className="scenario-download-button" onClick={onDownload}>
         <Download size={18} />Download scenario set<ChevronDown size={16} />
@@ -412,11 +437,11 @@ const generators = [
   { id: 'rate-shock-v09', name: 'Rate Shock Pack v0.9', state: 'Draft', category: 'Sensitivity', details: 'Parallel and instantaneous rate shocks across multiple magnitudes for sensitivity analysis.', metric: 'Rate shock (bps)', version: 'v0.9', batch: '12 batches', seed: '20261231', chart: 'step' },
 ]
 
-function ScenarioGeneratorLibrary({ libraryGenerators, onNotify, onViewBase, onOpenAnalysis }) {
+function ScenarioGeneratorLibrary({ libraryGenerators, onNotify, onViewBase, onOpenAnalysis, importAllowed, onOpenDataManager }) {
   const [query, setQuery] = useState('')
   const filtered = libraryGenerators.filter(item => `${item.name} ${item.category} ${item.details}`.toLowerCase().includes(query.trim().toLowerCase()))
   return <div className="sg-page">
-    <div className="sg-title-row"><div><span className="sg-eyebrow">Scenarios</span><h1>Scenario Generator Library</h1><p>This retained reference catalog is not connected to backend M1, which does not expose generator management.</p></div><div className="sg-title-actions"><label className="sg-search"><Search size={17} /><input aria-label="Search scenario generators" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search" /></label><button className="sg-import-button" onClick={() => onNotify('Scenario import is not available in backend M1.')}><FileUp size={17} />Import scenario</button></div></div>
+    <div className="sg-title-row"><div><span className="sg-eyebrow">Scenarios</span><h1>Scenario Generator Library</h1><p>This retained reference catalog is kept for review and comparison; generator management remains backend-driven when the workflow is exposed.</p></div><div className="sg-title-actions"><label className="sg-search"><Search size={17} /><input aria-label="Search scenario generators" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search" /></label>{importAllowed && <button className="sg-import-button" onClick={() => onOpenDataManager?.('scenario')}><FileUp size={17} />Import scenario</button>}</div></div>
     <section className="sg-hero"><span className="sg-hero-icon"><Activity size={38} /></span><div className="sg-hero-copy"><h2>Reusable scenario generators</h2><b>Build once. Reuse across models.</b><p>Create and manage scenario generator definitions that preserve parameters, calibration, versioning, and reproducibility. Drive faster analysis with consistent, industry-aligned scenario logic.</p></div><ul><li><Layers size={19} />Consistent assumptions across analyses</li><li><Clock3 size={19} />Versioned and reproducible</li><li><ShieldCheck size={19} />Aligned with industry standards</li></ul></section>
     <div className="sg-summary-grid">
       <button onClick={() => onNotify('Showing validated scenario generators')}><span><Check size={21} /></span><b>{libraryGenerators.filter(item => item.state === 'Validated').length}</b><div><strong>Validated generators</strong><small>Ready for use in analysis</small></div><ArrowRight size={17} /></button>
@@ -427,7 +452,7 @@ function ScenarioGeneratorLibrary({ libraryGenerators, onNotify, onViewBase, onO
       <main><div className="sg-list-heading"><div><h2>Generators</h2><p>Preconfigured scenario generator definitions for the current model context.</p></div><span>Sort by <select defaultValue="Name (A–Z)"><option>Name (A–Z)</option><option>Last updated</option></select> {filtered.length} generators</span></div>
         <div className="sg-generator-grid">{filtered.map(item => <GeneratorCard key={item.id} item={item} onView={onViewBase} onNotify={onNotify} isBase={item.id === 'economic-base-v21'} />)}</div>
       </main>
-      <aside className="sg-create-rail"><h2>Create new generator</h2><p>Generator creation and import are not supported by backend M1.</p><button className="sg-new-button" onClick={() => onNotify('New scenario generator creation is not available in backend M1.')}><Plus size={18} />New generator</button><h3>Start from a template</h3>{[['Economic base', 'Standard assumptions'], ['Stochastic lapse', 'Economic + lapse'], ['Rate shock', 'Sensitivity analysis'], ['Custom generator', 'Advanced configuration']].map(([name, detail], index) => <button className="sg-template" key={name} onClick={() => index === 0 ? onViewBase() : onNotify(`${name} generator creation is not available in backend M1.`)}><span>{index === 3 ? <Settings2 size={19} /> : <Activity size={19} />}</span><b>{name}<small>{detail}</small></b><ChevronRight size={17} /></button>)}<div className="sg-reuse-note"><Layers size={18} /><span>Generator configuration, versioning, and seed management are not provided by backend M1.<button onClick={onOpenAnalysis}>Open scenario analysis <ArrowRight size={14} /></button></span></div></aside>
+      <aside className="sg-create-rail"><h2>Create new generator</h2><p>Generator creation and import follow the current backend workflow when the project exposes those capabilities.</p><button className="sg-new-button" onClick={() => onNotify('New scenario generator creation is gated by the backend workflow for this project.')}><Plus size={18} />New generator</button><h3>Start from a template</h3>{[['Economic base', 'Standard assumptions'], ['Stochastic lapse', 'Economic + lapse'], ['Rate shock', 'Sensitivity analysis'], ['Custom generator', 'Advanced configuration']].map(([name, detail], index) => <button className="sg-template" key={name} onClick={() => index === 0 ? onViewBase() : onNotify(`${name} generator creation is gated by the backend workflow for this project.`)}><span>{index === 3 ? <Settings2 size={19} /> : <Activity size={19} />}</span><b>{name}<small>{detail}</small></b><ChevronRight size={17} /></button>)}<div className="sg-reuse-note"><Layers size={18} /><span>Generator configuration, versioning, and seed management stay backend-driven in the current contract.<button onClick={onOpenAnalysis}>Open scenario analysis <ArrowRight size={14} /></button></span></div></aside>
     </div>
   </div>
 }
@@ -439,7 +464,7 @@ function GeneratorCard({ item, onView, onNotify, isBase }) {
     <h3>{item.name}</h3><span className="sg-category">{item.category}</span><p>{item.details}</p>
     <div className="sg-chart-title">{item.metric}</div><MiniScenarioChart step={item.chart === 'step'} />
     <div className="sg-card-meta"><span>▧ Version<b>{item.version}</b></span><span>♧ Last batch<b>{item.batch}</b></span><span>⌘ Seed<b>{item.seed}</b></span></div>
-    <div className="sg-card-actions"><button disabled={!validated} onClick={onView}>View details <ArrowRight size={15} /></button><button aria-label={`More actions for ${item.name}`} onClick={() => onNotify('Generator actions are not available in backend M1.')}><MoreVertical size={17} /></button></div>
+    <div className="sg-card-actions"><button disabled={!validated} onClick={onView}>View details <ArrowRight size={15} /></button><button aria-label={`More actions for ${item.name}`} onClick={() => onNotify('Generator actions are gated by the current backend workflow for this project.')}><MoreVertical size={17} /></button></div>
     {isBase && <button className="sg-hidden-detail-link" onClick={onView}>Open Economic Base scenario</button>}
   </article>
 }
@@ -472,10 +497,10 @@ function BaseScenarioPage({ backLabel, onBack, onNotify, onAttach, scenario, sce
     onAttach?.()
   }
   return <div className="sg-page">
-    <div className="sg-title-row sg-detail-title"><div><button className="sg-back-link" onClick={onBack}>{backLabel}</button><span className="sg-eyebrow">Scenarios</span><h1>{scenarioName}</h1><p>Saved scenario details from the project registry. Backend M1 does not include generated path data.</p></div><span className="sg-validated-pill"><i />{scenario?.status || 'Not in project registry'}</span></div>
+    <div className="sg-title-row sg-detail-title"><div><button className="sg-back-link" onClick={onBack}>{backLabel}</button><span className="sg-eyebrow">Scenarios</span><h1>{scenarioName}</h1><p>Saved scenario details from the project registry. Generated path data appears only when the backend returns it for the selected scenario.</p></div><span className="sg-validated-pill"><i />{scenario?.status || 'Not in project registry'}</span></div>
     <section className="sg-detail-hero"><span className="sg-hero-icon"><Activity size={36} /></span><div className="sg-detail-description"><h2>{scenarioName}</h2><b>Scenario set detail</b><p>{scenario?.description || 'No saved scenario details are available for this project scenario.'}</p></div><div className="sg-detail-stats">{[[scenario?.path_count?.toLocaleString?.() || '—', 'Paths', <Copy key="paths" size={18} />], [scenario?.horizon || '—', 'Horizon', <CalendarDays key="horizon" size={18} />], [scenario?.consumer_count ?? '—', 'Projection Set consumers', <UsersRound key="consumers" size={18} />], [scenario?.version_label || '—', 'Version', <Database key="version" size={18} />]].map(([value, label, icon]) => <div key={label}><span>{icon}</span><b>{value}<small>{label}</small></b></div>)}<div className="sg-detail-buttons"><button className="sg-attach-button" onClick={attach}>Attach to Projection <ArrowRight size={17} /></button><button className="sg-compare-button" onClick={() => setCompare(true)}><GitBranch size={17} />Compare scenarios</button></div></div></section>
     {compare && <ScenarioComparison scenarioItems={scenarioItems} onClose={() => setCompare(false)} />}
-    <div className="sg-detail-content"><section className="sg-card sg-path-card"><div className="sg-section-heading"><div><h2>Scenario path preview</h2><p>Illustrative preview only; backend M1 does not return interest-rate, lapse, or mortality path data.</p></div><label><select value={horizon} onChange={event => setHorizon(event.target.value)}><option>10 years</option><option>20 years</option><option>30 years</option></select><ChevronDown size={15} /></label></div><div className="sg-metric-chart"><b>Interest rate (short rate)</b><LargeScenarioChart variant="rate" /></div><div className="sg-metric-chart"><b>Lapse rate</b><LargeScenarioChart variant="lapse" /></div><div className="sg-metric-chart"><b>Mortality</b><LargeScenarioChart variant="mortality" /></div><div className="sg-legend"><span><i className="sg-range-wide" />5–95%</span><span><i className="sg-range-mid" />25–75%</span><span><i className="sg-median-line" />Median</span><span><i className="sg-baseline" />Illustrative baseline</span></div></section>
+    <div className="sg-detail-content"><section className="sg-card sg-path-card"><div className="sg-section-heading"><div><h2>Scenario path preview</h2><p>Illustrative preview only; the backend may not return all rate, lapse, or mortality path data for every scenario.</p></div><label><select value={horizon} onChange={event => setHorizon(event.target.value)}><option>10 years</option><option>20 years</option><option>30 years</option></select><ChevronDown size={15} /></label></div><div className="sg-metric-chart"><b>Interest rate (short rate)</b><LargeScenarioChart variant="rate" /></div><div className="sg-metric-chart"><b>Lapse rate</b><LargeScenarioChart variant="lapse" /></div><div className="sg-metric-chart"><b>Mortality</b><LargeScenarioChart variant="mortality" /></div><div className="sg-legend"><span><i className="sg-range-wide" />5–95%</span><span><i className="sg-range-mid" />25–75%</span><span><i className="sg-median-line" />Median</span><span><i className="sg-baseline" />Illustrative baseline</span></div></section>
       <aside className="sg-card sg-provenance"><h2>Provenance</h2>{[['Scenario set', <Copy key="generator" size={16} />], ['Version', <CodeIcon key="version" />], ['Random seed', <Layers key="seed" size={17} />], ['Projection Set consumers', <UsersRound key="consumers" size={17} />]].map(([key, icon]) => <div className="sg-provenance-line" key={key}><span>{icon}{key}</span><b>{key === 'Scenario set' ? scenario?.scenario_set_name || notReported : key === 'Version' ? scenario?.version_label || notReported : key === 'Random seed' ? scenario?.seed ?? notReported : scenario?.consumer_count ?? notReported}</b></div>)}<h3>Validation &amp; reproducibility</h3><button className="sg-validation-status" onClick={() => onNotify(`Backend scenario status: ${scenario?.status || 'not reported'}`)}><Activity size={24} /><span><b>Backend scenario status</b><small>{scenario?.status || 'Not reported'}</small></span><ChevronRight size={16} /></button><div className="sg-provenance-facts">{[['As of', scenario?.as_of_date || notReported], ['Generated by', scenario?.created_by || notReported], ['Model', scenario?.model_name || notReported], ['Paths', scenario?.path_count?.toLocaleString?.() || notReported], ['Horizon', scenario?.horizon || notReported], ['Seed', scenario?.seed ?? notReported]].map(([key, value]) => <p key={key}><span>{key}</span><b>{value}</b></p>)}</div><button className="sg-attach-button" onClick={attach}>Attach to Projection <ArrowRight size={17} /></button><button className="sg-compare-button" onClick={() => setCompare(true)}><GitBranch size={17} />Compare scenarios</button></aside>
     </div>
   </div>

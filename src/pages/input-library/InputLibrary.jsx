@@ -18,8 +18,10 @@ import {
   X,
 } from 'lucide-react'
 import { StatusBadge } from '../../components/ui/StatusBadge'
+import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
+import { canImportData } from '../../api/permissions'
 import './input-library.css'
 
 const EMPTY_INPUTS = []
@@ -36,6 +38,8 @@ const inputTabs = [
 
 export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
   const { projectId } = useWorkspace()
+  const { user } = useApi()
+  const uploadAllowed = canImportData(user?.roles ?? [])
   const inputsQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/inputs` : null)
   const issuesQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/validation-issues` : null)
   const apiInputs = inputsQuery.data?.inputs ?? EMPTY_INPUTS
@@ -48,10 +52,11 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
       version: item.version_label || '—',
       scope: item.scope || '—',
       records: `${item.record_count ?? 0} ${item.record_unit || 'records'}`,
-      status: item.status === 'validated' ? 'Validated' : item.status === 'needs_review' ? 'Needs review' : 'Draft',
+      status: item.status === 'validated' ? 'validated' : item.status === 'needs_review' ? 'needs_review' : item.status === 'approved' ? 'approved' : item.status === 'rejected' ? 'rejected' : item.status === 'superseded' ? 'superseded' : item.status === 'legacy_unvalidated' ? 'legacy_unvalidated' : 'draft',
       updated: updated && !Number.isNaN(updated.valueOf()) ? updated.toLocaleDateString() : '—',
       description: item.description || '—',
-      category: item.category_label,
+      category: item.category ?? item.category_label,
+      categoryLabel: item.category_label ?? item.category,
       calculations: 0,
       metrics: 0,
       runs: 0,
@@ -77,11 +82,11 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
         activeTab === 'Input Library' ||
         activeTab === 'Mappings' ||
         activeTab === 'Validation Center' ||
-        record.category === activeTab
+        record.category === activeTab || record.categoryLabel === activeTab
       const matchesStatus =
         statusFilter === 'All statuses' || record.status === statusFilter
       const searchText = `${record.name} ${record.detail} ${record.scope} ${record.version} ${record.records}`.toLowerCase()
-      const needsReview = activeTab !== 'Validation Center' || record.status === 'Needs review'
+      const needsReview = activeTab !== 'Validation Center' || record.status === 'needs_review'
 
       return matchesTab && matchesStatus && needsReview && searchText.includes(normalizedQuery)
     })
@@ -99,7 +104,7 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
       return
     }
     setActiveTab(tab)
-    const nextRecord = inputRecords.find((record) => tab === 'Input Library' || tab === 'Mappings' || tab === 'Validation Center' || record.category === tab)
+    const nextRecord = inputRecords.find((record) => tab === 'Input Library' || tab === 'Mappings' || tab === 'Validation Center' || record.category === tab || record.categoryLabel === tab)
     if (nextRecord) setSelectedId(nextRecord.id)
   }
 
@@ -158,9 +163,9 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
                 onClick={() => setView('grid')}
               ><LayoutGrid size={17} /></button>
             </div>
-            <button className="input-import-button" onClick={() => onOpenInforceImport?.()}>
+            {uploadAllowed && <button className="input-import-button" onClick={() => onOpenInforceImport?.()}>
               <Upload size={18} />Import input
-            </button>
+            </button>}
           </div>
 
           {filtersOpen && (
@@ -168,9 +173,13 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
               <label className="flex items-center gap-2 text-xs text-[#71809f]">
                 Status
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                  <option>All statuses</option>
-                  <option>Validated</option>
-                  <option>Needs review</option>
+                  <option value="All statuses">All statuses</option>
+                  <option value="validated">Validated</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="superseded">Superseded</option>
+                  <option value="draft">Draft</option>
                 </select>
               </label>
               <button onClick={() => setStatusFilter('All statuses')}>Clear filters</button>
@@ -193,7 +202,7 @@ export function InputLibrary({ onNotify, onNavigate, onOpenInforceImport }) {
           </div>
         </div>
 
-        {selectedInput ? <InputDetails input={selectedInput} onNotify={onNotify} /> : <aside className="input-details-panel rounded-[10px] bg-white p-5">No input record is available for this project yet.</aside>}
+        {selectedInput ? <InputDetails key={selectedInput.id} input={selectedInput} onNotify={onNotify} /> : <aside className="input-details-panel rounded-[10px] bg-white p-5">No input record is available for this project yet.</aside>}
       </section>
 
       <aside className="input-issue-banner flex items-center gap-4 rounded-[10px] px-5 py-4 max-[650px]:flex-wrap">
@@ -265,6 +274,32 @@ function InputRow({ record, selected, onSelect, view }) {
 }
 
 function InputDetails({ input, onNotify }) {
+  const [offset, setOffset] = useState(0)
+  const kind = String(input.category ?? '').toLowerCase().replaceAll(' ', '_')
+  const isInforce = ['liability_inforce', 'asset_inforce', 'inforce'].includes(kind)
+  const isAssumption = kind === 'assumption_table'
+  const isFactor = kind === 'factor_table'
+  const limit = 25
+  const detailPath = isInforce
+    ? `/v1/inputs/inforce/${encodeURIComponent(input.id)}`
+    : isAssumption
+      ? `/v1/inputs/assumption-tables/${encodeURIComponent(input.id)}?limit=${limit}&offset=${offset}`
+      : isFactor
+        ? `/v1/inputs/factor-tables/${encodeURIComponent(input.id)}?limit=${limit}&offset=${offset}`
+        : null
+  const detailQuery = useApiQuery(detailPath)
+  const inforceRecordsQuery = useApiQuery(isInforce ? `/v1/inputs/inforce/${encodeURIComponent(input.id)}/records?limit=${limit}&offset=${offset}` : null)
+  const detail = detailQuery.data
+  const records = isInforce
+    ? (inforceRecordsQuery.data?.records ?? []).map(record => ({ ...record.data, policy_id: record.policy_id ?? record.data?.policy_id }))
+    : (detail?.rows ?? [])
+  const total = isInforce ? (inforceRecordsQuery.data?.total ?? detail?.record_count ?? 0) : (detail?.total ?? 0)
+  const columns = detail?.columns?.length ? detail.columns : [...new Set(records.flatMap(record => Object.keys(record ?? {})))]
+  const loading = detailQuery.loading || inforceRecordsQuery.loading
+  const error = detailQuery.error || inforceRecordsQuery.error
+  const pageCount = Math.max(1, Math.ceil(total / limit))
+  const currentPage = Math.floor(offset / limit) + 1
+
   return (
     <aside className="input-details-panel rounded-[10px] bg-white p-5">
       <div className="mb-5 flex items-start justify-between gap-3">
@@ -283,9 +318,19 @@ function InputDetails({ input, onNotify }) {
         <DetailItem label="Version" value={input.version} />
         <DetailItem label="Records" value={input.records} />
         <DetailItem label="Last updated" value={input.updated} />
-        <DetailItem label="Validation" value={input.status === 'Validated' ? 'Passed validation' : 'Review required'} />
+        <DetailItem label="Fingerprint" value={detail?.fingerprint ?? input.fingerprint ?? 'Not provided'} />
+        <DetailItem label="Validation" value={detail?.validation?.status ?? input.status} />
         <DetailItem label="Description" value={input.description} />
       </dl>
+      {(isInforce || isAssumption || isFactor) && <section className="input-record-viewer" aria-label="Input records">
+        <div className="input-record-viewer-heading"><h3>Input rows</h3><small>{total.toLocaleString()} total</small></div>
+        {loading && <p role="status">Loading input rows…</p>}
+        {error && <p role="alert">Could not load input rows: {error.message}</p>}
+        {!loading && !error && records.length > 0 && <div className="input-record-table-scroll"><table><thead><tr>{columns.map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{records.map((record, index) => <tr key={`${record.policy_id ?? record.id ?? offset + index}-${index}`}>{columns.map(column => <td key={column}>{record[column] == null ? '—' : String(record[column])}</td>)}</tr>)}</tbody></table></div>}
+        {!loading && !error && records.length === 0 && <p>No rows are available for this input.</p>}
+        {detail?.validation?.checks?.length > 0 && <details className="input-detail-validation"><summary>Validation checks ({detail.validation.checks.length})</summary>{detail.validation.checks.map(check => <p key={check.code}><b>{check.status}</b> · {check.label}{check.message ? ` — ${check.message}` : ''}</p>)}</details>}
+        {total > limit && <div className="input-record-pagination"><button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button><span>Page {currentPage} of {pageCount}</span><button disabled={offset + limit >= total} onClick={() => setOffset(offset + limit)}>Next</button></div>}
+      </section>}
       <div className="input-downstream">
         <h3>Downstream impact</h3>
         <p>This input connects to the following model components and runs.</p>
@@ -293,8 +338,8 @@ function InputDetails({ input, onNotify }) {
         <ImpactRow icon={<Play size={19} />} title="Output Metrics" detail="Policy projections" count={input.metrics} />
         <ImpactRow icon={<Database size={19} />} title="Run results" detail="Scenario & comparison" count={input.runs} />
       </div>
-      <button className="input-lineage-button" onClick={() => onNotify(`Lineage opened for ${input.name}`)}>
-        <Network size={18} />View full lineage
+      <button className="input-lineage-button" onClick={() => onNotify(detail?.fingerprint ? `${input.name} fingerprint: ${detail.fingerprint}` : `No lineage endpoint is exposed for ${input.name}; the rows and validation details above are from the input API.`)}>
+        <Network size={18} />View input lineage
       </button>
     </aside>
   )

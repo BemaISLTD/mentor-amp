@@ -27,6 +27,11 @@
 .mentor-conversation small { color: #6e7b94; font-size: 12px; line-height: 1.35; }
 .mentor-conversation small i { padding: 0 5px; font-style: normal; }
 .mentor-conversation.is-active { margin: 8px -3px 4px; border: 1px solid #def2d1; border-radius: 9px; background: linear-gradient(110deg,#effbe6,#e8f8df); }
+.mentor-coming-soon { display: grid; max-width: 650px; justify-items: start; gap: 13px; margin: clamp(24px,7vh,72px) auto; border: 1px solid #dce5eb; border-radius: 16px; padding: clamp(22px,4vw,38px); background: radial-gradient(ellipse at 0 100%,rgba(181,247,131,.18),transparent 45%),linear-gradient(145deg,#fff,#f8fbff); box-shadow: 0 10px 32px rgba(28,44,61,.06); }
+.mentor-coming-soon-icon { display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid #dcead3; border-radius: 13px; background: #f1f8ec; color: #528d3b; }
+.mentor-coming-soon-label { display: inline-flex; align-items: center; gap: 6px; color: #718168; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.mentor-coming-soon h3 { margin: -5px 0 0; color: #14213d; font-size: clamp(20px,3vw,25px); letter-spacing: -.035em; }
+.mentor-coming-soon p { max-width: 510px; margin: -5px 0 4px; color: #68778d; font-size: 13px; line-height: 1.65; }
 .mentor-empty-search,.mentor-no-saved { color: #78849b; font-size: 13px; }
 .mentor-thread { display: flex; flex-direction: column; padding: 15px 16px 11px; }
 .mentor-thread-heading { margin-bottom: 14px; }

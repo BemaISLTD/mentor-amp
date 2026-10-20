@@ -538,6 +538,12 @@
 .mentor-guardrail > span { display: flex; flex-direction: column; gap: 4px; }
 .mentor-guardrail b { color: #536d41; font-size: 9px; font-weight: 500; }
 .mentor-guardrail small { color: #8190aa; font-size: 8px; line-height: 1.45; }
+.trace-dependents-panel { display: grid; gap: 7px; border: 1px solid #e2e8ed; border-radius: 7px; padding: 9px; background: #fbfcfd; }
+.trace-dependents-panel h3 { color: #26364d; font-size: 10px; font-weight: 700; }
+.trace-dependents-panel > p { color: #71809f; font-size: 9px; }
+.trace-dependents-panel article { display: grid; gap: 3px; border-top: 1px solid #edf0f2; padding-top: 6px; overflow-wrap: anywhere; }
+.trace-dependents-panel article b { color: #34465c; font-size: 9px; }
+.trace-dependents-panel article span { color: #718096; font-size: 8px; }
 
 @media (max-width: 1000px) {
   .investigation-main-grid { grid-template-columns: minmax(0, 1fr); }

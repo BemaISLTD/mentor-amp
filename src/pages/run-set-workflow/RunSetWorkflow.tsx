@@ -4,6 +4,7 @@ import { useApp } from '../../context/useApp'
 import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
+import { canSubmitRuns } from '../../api/permissions'
 import { ExecutionCenter } from '../execution-center/ExecutionCenter'
 import './run-set-workflow.css'
 
@@ -27,10 +28,11 @@ const statusClass = (status: string) => status.toLowerCase().replaceAll(' ', '-'
 
 export function RunSetSubmissionDialog({ projectionSets, initialProjectionSetId, onClose }: { projectionSets: ProjectionSet[]; initialProjectionSetId?: string; onClose: () => void }) {
   const { setActiveScreen, setActiveExecutionRunSetId } = useApp()
-  const { request } = useApi()
+  const { request, user } = useApi()
   const { projects, projectId: workspaceProjectId } = useWorkspace()
   const initialSet = projectionSets.find(set => set.id === initialProjectionSetId)
   const [projectId, setProjectId] = useState(initialSet?.projectId ?? workspaceProjectId ?? '')
+  const canSubmit = canSubmitRuns(user?.roles ?? [])
   const [selectedSetIds, setSelectedSetIds] = useState<string[]>(initialSet?.id ? [initialSet.id] : [])
   const [overrideScenarios, setOverrideScenarios] = useState(false)
   const [selectedScenarioIds, setSelectedScenarioIds] = useState<string[]>([])
@@ -187,8 +189,9 @@ export function RunSetSubmissionDialog({ projectionSets, initialProjectionSetId,
       <footer className="run-set-dialog-actions">
         <button className="run-set-cancel" onClick={onClose}>Cancel</button>
         <button className="run-set-preflight" disabled={!canPreflight || projectSetsLoading || preflighting || (overrideScenarios && (scenarioLoading || scenarioError !== null || !selectedScenarioIds.length))} onClick={runPreflight}><ShieldCheck size={16} />{preflighting ? 'Checking…' : 'Run preflight'}</button>
-        <button className="run-set-submit" disabled={!preflight?.ok || submitting} onClick={submitRunSet}><Play size={15} />{submitting ? 'Submitting…' : 'Submit Run Set'}</button>
+        {canSubmit && <button className="run-set-submit" disabled={!preflight?.ok || submitting} onClick={submitRunSet}><Play size={15} />{submitting ? 'Submitting…' : 'Submit Run Set'}</button>}
       </footer>
+      {!canSubmit && <p className="run-set-atomic-note">Your role does not permit run submission.</p>}
       <p className="run-set-atomic-note">Submission is atomic: if any pairing cannot be frozen, no partial Run Set is created.</p>
     </section>
   </div>
@@ -209,7 +212,8 @@ function PreflightReport({ result }: { result: PreflightResult }) {
 export function RunSetWorkflow({ onNotify }: { onNotify: (message: string) => void }) {
   const { setActiveScreen, activeExecutionRunSetId, setActiveExecutionRunSetId } = useApp()
   const { projectId, project } = useWorkspace()
-  const { request } = useApi()
+  const { request, user } = useApi()
+  const canSubmit = canSubmitRuns(user?.roles ?? [])
   const listQuery = useApiQuery<{ run_sets: any[]; stats: { run_set_count: number; active_run_count: number; needs_recovery_run_count: number } }>(projectId ? `/v1/projects/${projectId}/run-sets?limit=100` : null, 4000)
   const runSets = listQuery.data?.run_sets ?? []
   const [selectedRunSetId, setSelectedRunSetId] = useState(activeExecutionRunSetId ?? '')
@@ -242,7 +246,7 @@ export function RunSetWorkflow({ onNotify }: { onNotify: (message: string) => vo
     if (activeExecutionRunSetId) { setSelectedRunSetId(activeExecutionRunSetId); setExecutionOpen(true) }
   }, [activeExecutionRunSetId])
 
-  const statusLabel = (value: string) => ({ success: 'Completed', partial_success: 'Partial success', failed: 'Failed', running: 'Running', queued: 'Queued', cancelled: 'Cancelled' }[value] ?? value)
+  const statusLabel = (value: string) => ({ success: 'Completed', partial_success: 'Partial success', failed: 'Failed', running: 'Running', pending: 'Pending', queued: 'Queued', cancelled: 'Cancelled' }[value] ?? value)
   const detail = detailQuery.data
   const mappedRuns = (detail?.runs ?? []).map((run: any) => {
     const progress = run.progress ?? {}
@@ -254,6 +258,10 @@ export function RunSetWorkflow({ onNotify }: { onNotify: (message: string) => vo
       projectionSetName: run.projection_set_name || 'Projection Set',
       scenarioId: run.scenario_id,
       scenarioName: run.scenario_name || run.name || 'Scenario',
+      canCancel: Boolean(run.can_cancel),
+      canRetry: Boolean(run.can_retry),
+      retriedFromRunId: run.retried_from_run_id ?? null,
+      resultsAvailable: Boolean(run.results_available),
       status: statusLabel(run.status),
       progress: { ...progress, done, total, percent: Number(progress.percent ?? (total ? Math.round(done / total * 100) : 0)), unit: progress.unit || 'policies' },
       events: (eventsByRun[run.id] ?? []).map(event => ({ id: event.id, timestamp: event.timestamp ?? event.created_at, level: event.level || 'info', step: event.step || event.type || 'event', message: event.message || '' })),
@@ -268,16 +276,16 @@ export function RunSetWorkflow({ onNotify }: { onNotify: (message: string) => vo
 
   if (executionOpen && activeExecutionRunSetId) {
     if (!executionRecord) return <div className="run-set-library-empty"><Clock3 size={25} /><h3>Loading live execution…</h3>{detailQuery.error && <p>{detailQuery.error.message}</p>}</div>
-    return <ExecutionCenter runSet={executionRecord as any} onNotify={onNotify} onBackToRunSets={() => { setActiveExecutionRunSetId(null); setExecutionOpen(false) }} />
+    return <ExecutionCenter runSet={executionRecord as any} onNotify={onNotify} onRefresh={async () => { await Promise.all([detailQuery.refetch(), listQuery.refetch()]) }} onBackToRunSets={() => { setActiveExecutionRunSetId(null); setExecutionOpen(false) }} />
   }
 
   const totalRuns = runSets.reduce((sum, item) => sum + (item.run_count ?? 0), 0)
-  const queuedRuns = runSets.reduce((sum, item) => sum + (item.runs_by_status?.queued ?? 0), 0)
+  const pendingRuns = runSets.reduce((sum, item) => sum + (item.runs_by_status?.pending ?? (item.runs_by_status?.queued ?? 0)), 0)
   return <div className="run-set-library-page">
     <header className="run-set-library-header">
       <div className="run-set-library-intro"><span className="run-set-library-icon"><Sparkles size={18} /></span><div><span className="run-set-library-kicker">EXECUTION WORKSPACE</span><h2>Run Set Library</h2><p>Review submissions, follow each Projection Set/scenario run, and inspect execution events.</p></div></div>
-      <div className="run-set-library-actions"><span className="run-set-mock-pill"><i />Live backend</span><button className="run-set-library-create" onClick={() => setActiveScreen('Projections')}><Play size={14} />Create Run Set</button></div>
-      <div className="run-set-library-overview"><div><b>{listQuery.data?.stats?.run_set_count ?? runSets.length}</b><span>submissions</span></div><i /><div><b>{totalRuns}</b><span>individual runs</span></div><i /><div><b>{queuedRuns}</b><span>queued</span></div></div>
+      <div className="run-set-library-actions"><span className="run-set-mock-pill"><i />Live backend</span>{canSubmit && <button className="run-set-library-create" onClick={() => setActiveScreen('Projections')}><Play size={14} />Create Run Set</button>}</div>
+      <div className="run-set-library-overview"><div><b>{listQuery.data?.stats?.run_set_count ?? runSets.length}</b><span>submissions</span></div><i /><div><b>{totalRuns}</b><span>individual runs</span></div><i /><div><b>{pendingRuns}</b><span>pending</span></div></div>
     </header>
     {listQuery.loading && runSets.length === 0 ? <section className="run-set-library-empty"><Clock3 size={30} /><h3>Loading submissions…</h3></section> : listQuery.error ? <section className="run-set-library-empty"><CircleAlert size={25} /><h3>Could not load Run Sets</h3><p>{listQuery.error.message}</p></section> : runSets.length === 0 ? <section className="run-set-library-empty"><Clock3 size={30} /><h3>No submitted Run Sets yet</h3><p>Go to Projection Sets and choose <b>Create Run Set</b> to preflight and submit a configuration.</p><button onClick={() => setActiveScreen('Projections')}><ArrowLeft size={15} />Go to Projection Sets</button></section> : <div className="run-set-library-grid">
       <section className="run-set-submissions"><div className="run-set-section-heading"><h3>Submissions</h3><span>{runSets.length}</span></div>
@@ -288,7 +296,7 @@ export function RunSetWorkflow({ onNotify }: { onNotify: (message: string) => vo
       {selected && <section className="run-set-detail">
         <div className="run-set-detail-heading"><div><span>RUN SET · {selected.id.slice(0, 14)}</span><h3>{selected.name}</h3><p>{project?.name ?? projectId} · {new Date(selected.submitted_at).toLocaleString()}</p></div><span className={`run-set-status run-set-status-${statusClass(statusLabel(selected.status))}`}>{statusLabel(selected.status)}</span></div>
         <button className="run-set-open-execution" onClick={() => { setActiveExecutionRunSetId(selected.id); setExecutionOpen(true) }}><span className="run-set-open-icon"><Play size={17} fill="currentColor" /></span><span className="run-set-open-copy"><b>Open execution workspace</b><small>Monitor live run progress, events, and execution details</small></span><span className="run-set-open-arrow"><ArrowRight size={17} /></span></button>
-        <div className="run-set-detail-stats"><Stat label="Projection Sets" value={selected.projection_sets?.length ?? 0} /><Stat label="Individual runs" value={selected.run_count ?? 0} /><Stat label="Queued" value={selected.runs_by_status?.queued ?? 0} /><Stat label="Reports" value={selected.report_count ?? 0} /></div>
+        <div className="run-set-detail-stats"><Stat label="Projection Sets" value={selected.projection_sets?.length ?? 0} /><Stat label="Individual runs" value={selected.run_count ?? 0} /><Stat label="Pending" value={selected.runs_by_status?.pending ?? selected.runs_by_status?.queued ?? 0} /><Stat label="Reports" value={selected.report_count ?? 0} /></div>
         {selected.notes && <p className="run-set-notes"><FileText size={15} />{selected.notes}</p>}
         <div className="run-set-run-table"><div className="run-set-run-table-heading"><span>Run · Projection Set / Scenario</span><span>Status</span><span>Policy progress</span></div>
           {detailQuery.error && detailId === selected.id ? <p className="run-set-empty">Could not load run details: {detailQuery.error.message}</p> : selected.id !== detail?.id ? <p className="run-set-empty">Loading live run details…</p> : null}

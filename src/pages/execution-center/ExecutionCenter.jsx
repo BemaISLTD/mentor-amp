@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowLeft,
   Check,
@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { useApp } from '../../context/useApp'
+import { ApiError, useApi } from '../../api/ApiProvider'
 import './execution-center.css'
 
 const executionSteps = [
@@ -22,9 +23,9 @@ const executionSteps = [
   { name: 'Sensitivity scenarios', state: 'Completed' },
   { name: 'Reserve aggregation', state: 'Completed' },
   { name: 'Actuarial reporting', state: 'Running' },
-  { name: 'Quality checks', state: 'Queued' },
-  { name: 'Executive summary', state: 'Queued' },
-  { name: 'Report rendering', state: 'Queued' },
+  { name: 'Quality checks', state: 'Pending' },
+  { name: 'Executive summary', state: 'Pending' },
+  { name: 'Report rendering', state: 'Pending' },
 ]
 
 const initialLogs = [
@@ -35,16 +36,141 @@ const initialLogs = [
   '09:01:08 · Actuarial reporting in progress',
 ]
 
-export function ExecutionCenter({ onNotify, onBackToRunSets, runSet }) {
+const normalizeRunStatus = (value) => {
+  const normalized = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return normalized === 'completed' ? 'success' : normalized
+}
+const labelForRunStatus = (value) => ({
+  pending: 'Pending',
+  running: 'Running',
+  success: 'Completed',
+  partial_success: 'Partial success',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  queued: 'Queued',
+})[normalizeRunStatus(value)] ?? String(value ?? 'Unknown')
+
+const formatEvidenceJson = (value) => JSON.stringify(value, null, 2)
+
+function RunEvidencePanel({ evidence, onClose }) {
+  if (!evidence) return null
+  const packageData = evidence.package
+  const frozenPackage = packageData?.package
+  const configuration = frozenPackage?.configuration
+  const manifest = evidence.manifest
+  const attempts = evidence.attempts?.attempts ?? []
+  const steps = evidence.steps?.steps ?? []
+  const datasets = configuration?.datasets
+    ? Object.values(configuration.datasets).flat().filter(Boolean)
+    : []
+
+  return (
+    <section className="execution-evidence-panel" aria-label="Run evidence">
+      <div className="execution-evidence-heading">
+        <div><h3>Run evidence</h3><p>Frozen inputs and execution records for run {evidence.runId}</p></div>
+        <button className="execution-run-control" onClick={onClose}>Close evidence</button>
+      </div>
+      {evidence.loading && <p role="status">Loading run, package, manifest, attempts, and steps…</p>}
+      {evidence.errors?.length > 0 && (
+        <div className="execution-evidence-errors" role="alert">
+          <b>Some evidence could not be loaded:</b>
+          {evidence.errors.map(error => <p key={error}>{error}</p>)}
+        </div>
+      )}
+
+      {evidence.run && (
+        <div className="execution-evidence-section">
+          <h4>Run status</h4>
+          <div className="execution-evidence-summary">
+            <span><b>Status</b>{labelForRunStatus(evidence.run.status)}</span>
+            <span><b>Attempt</b>{evidence.run.accepted_attempt_number ?? evidence.run.attempt_count ?? 'Not accepted yet'}</span>
+            <span><b>Run package fingerprint</b>{evidence.run.run_package_fingerprint ?? 'Unavailable'}</span>
+            <span><b>Final manifest fingerprint</b>{evidence.run.final_manifest_fingerprint ?? 'Not available yet'}</span>
+            {evidence.run.retried_from_run_id && <span><b>Retried from</b>{evidence.run.retried_from_run_id}</span>}
+          </div>
+        </div>
+      )}
+
+      {packageData && (
+        <div className="execution-evidence-section">
+          <h4>Frozen package</h4>
+          <div className="execution-evidence-summary">
+            <span><b>Fingerprint</b>{packageData.fingerprint ?? frozenPackage?.fingerprint ?? 'Unavailable'}</span>
+            <span><b>Projection Set</b>{configuration?.projection_set?.name ?? configuration?.projection_set?.id ?? 'Unavailable'}</span>
+            <span><b>Model / version</b>{[configuration?.model?.name, configuration?.model_version?.version_label].filter(Boolean).join(' · ') || 'Unavailable'}</span>
+            <span><b>Valuation date</b>{configuration?.valuation_date ?? 'Unavailable'}</span>
+            <span><b>Scenario</b>{configuration?.scenario?.name ?? 'Unavailable'}</span>
+            <span><b>Inputs</b>{datasets.length ? datasets.map(dataset => dataset.name ?? dataset.id).join(', ') : 'None listed'}</span>
+            <span><b>Formulas / variables</b>{`${configuration?.formulas?.length ?? 0} / ${configuration?.variables?.length ?? 0}`}</span>
+          </div>
+          <details><summary>Inspect complete frozen package</summary><pre>{formatEvidenceJson(frozenPackage ?? packageData)}</pre></details>
+        </div>
+      )}
+
+      {manifest && (
+        <div className="execution-evidence-section">
+          <h4>Final manifest</h4>
+          {manifest.legacy_run && <p>This is a legacy run; it predates frozen run packages.</p>}
+          {!manifest.final_manifest
+            ? <p role="status">The run is incomplete. Its final manifest will be available when execution finishes.</p>
+            : <>
+              <div className="execution-evidence-summary">
+                <span><b>Fingerprint</b>{manifest.final_manifest.fingerprint}</span>
+                <span><b>Attempt</b>{manifest.final_manifest.attempt_number}</span>
+                <span><b>Created</b>{manifest.final_manifest.created_at}</span>
+              </div>
+              <details><summary>Inspect complete final manifest</summary><pre>{formatEvidenceJson(manifest.final_manifest.manifest)}</pre></details>
+            </>}
+        </div>
+      )}
+
+      {evidence.attempts && (
+        <div className="execution-evidence-section">
+          <h4>Execution attempts ({attempts.length})</h4>
+          {attempts.length === 0 ? <p>No attempts have started.</p> : attempts.map(attempt => (
+            <article className="execution-evidence-record" key={attempt.attempt_number}>
+              <b>Attempt {attempt.attempt_number} · {labelForRunStatus(attempt.status)}{attempt.accepted ? ' · accepted' : ''}</b>
+              <span>{attempt.started_at} – {attempt.completed_at ?? 'in progress'}</span>
+              {attempt.error_message && <p role="alert">{attempt.error_type ? `${attempt.error_type}: ` : ''}{attempt.error_message}</p>}
+              <span>Rows: {attempt.output_row_count ?? 0} outputs · {attempt.trace_row_count ?? 0} traces · cleanup: {attempt.cleanup_status ?? 'unknown'}</span>
+              {attempt.executed_build && <details><summary>Build identity</summary><pre>{formatEvidenceJson(attempt.executed_build)}</pre></details>}
+              {attempt.metrics && <details><summary>Attempt metrics</summary><pre>{formatEvidenceJson(attempt.metrics)}</pre></details>}
+            </article>
+          ))}
+        </div>
+      )}
+
+      {evidence.steps && (
+        <div className="execution-evidence-section">
+          <h4>Execution steps ({steps.length})</h4>
+          {steps.length === 0 ? <p>No steps have been reported.</p> : steps.map(step => (
+            <article className="execution-evidence-record" key={step.id}>
+              <b>{step.sequence}. {step.name} · {labelForRunStatus(step.status)}</b>
+              <span>{step.progress_done ?? 0} / {step.progress_total ?? 0}{step.started_at ? ` · started ${step.started_at}` : ''}</span>
+              {step.error_message && <p role="alert">{step.error_code ? `${step.error_code}: ` : ''}{step.error_message}</p>}
+              {step.metrics && <details><summary>Step metrics</summary><pre>{formatEvidenceJson(step.metrics)}</pre></details>}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+export function ExecutionCenter({ onNotify, onBackToRunSets, onRefresh, runSet }) {
   const { setActiveScreen } = useApp()
+  const { request } = useApi()
   const [status, setStatus] = useState('Running')
   const [logsOpen, setLogsOpen] = useState(false)
   const [snapshotOpen, setSnapshotOpen] = useState(false)
+  const [evidence, setEvidence] = useState(null)
+  const [busyRunAction, setBusyRunAction] = useState(null)
+  const [retryRunId, setRetryRunId] = useState(null)
 
   const progress = status === 'Cancelled' ? 71 : status === 'Paused' ? 71 : 71
   const completedJobs = 16
   const runningJobs = status === 'Running' ? 1 : 0
-  const queuedJobs = 7
+  const pendingJobs = 7
 
   const toggleRun = () => {
     if (status === 'Cancelled') {
@@ -62,12 +188,74 @@ export function ExecutionCenter({ onNotify, onBackToRunSets, runSet }) {
     onNotify('Run cancelled; completed outputs preserved')
   }
 
+  const viewRunEvidence = async (runId) => {
+    setEvidence({ runId, loading: true, errors: [] })
+    const endpoints = [
+      ['run', `/v1/runs/${runId}`],
+      ['package', `/v1/runs/${runId}/package`],
+      ['manifest', `/v1/runs/${runId}/manifest`],
+      ['attempts', `/v1/runs/${runId}/attempts`],
+      ['steps', `/v1/runs/${runId}/steps`],
+    ]
+    const responses = await Promise.all(endpoints.map(async ([key, path]) => {
+      try {
+        return { key, data: await request(path) }
+      } catch (error) {
+        return { key, error: error instanceof Error ? error.message : `Could not load ${key}.` }
+      }
+    }))
+    const data = Object.fromEntries(responses.filter(response => 'data' in response).map(response => [response.key, response.data]))
+    const errors = responses.filter(response => 'error' in response).map(response => `${response.key}: ${response.error}`)
+    setEvidence({ runId, loading: false, ...data, errors })
+  }
+
+  const handleRunAction = async (runId, action) => {
+    setBusyRunAction({ runId, action })
+    try {
+      const result = await request(`/v1/runs/${runId}/${action}`, { method: 'POST' })
+      if (action === 'retry') {
+        if (!result?.id) throw new Error('The retry response did not include the new run ID.')
+        setRetryRunId(result.id)
+        onNotify(result.retried_from_run_id === runId
+          ? 'Retry submitted as a new run linked to the original run.'
+          : 'Retry submitted, but the response did not confirm its link to the original run.')
+      } else {
+        onNotify(result?.status === 'cancelled' ? 'Run cancelled.' : 'Cancellation requested; the run will stop at a safe checkpoint.')
+      }
+      await onRefresh?.()
+      if (action === 'retry') await viewRunEvidence(result.id)
+      else if (evidence?.runId === runId) await viewRunEvidence(runId)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        const code = (error.code ?? '').toUpperCase()
+        const message = action === 'cancel' && code === 'RUN_NOT_CANCELLABLE'
+          ? 'This run is no longer cancellable. Its current status has been refreshed.'
+          : action === 'retry' && code === 'RUN_NOT_RETRYABLE'
+            ? 'This run is no longer eligible for retry. Its current status has been refreshed.'
+            : action === 'retry' && code === 'PACKAGE_MISSING'
+              ? 'This run cannot be retried because its frozen package is unavailable.'
+              : error.message
+        onNotify(message)
+        await onRefresh?.()
+      } else {
+        onNotify(error instanceof Error ? error.message : `Could not ${action} run.`)
+      }
+    } finally {
+      setBusyRunAction(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!retryRunId || !runSet?.runs.some(run => run.id === retryRunId)) return
+    document.getElementById(`execution-run-${retryRunId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [retryRunId, runSet?.runs])
+
   if (runSet) {
     const counts = {
-      completed: runSet.runs.filter(run => run.status === 'Completed').length,
-      running: runSet.runs.filter(run => run.status === 'Running').length,
-      queued: runSet.runs.filter(run => run.status === 'Queued').length,
-      failed: runSet.runs.filter(run => run.status === 'Failed').length,
+      completed: runSet.runs.filter(run => normalizeRunStatus(run.status) === 'success').length,
+      running: runSet.runs.filter(run => normalizeRunStatus(run.status) === 'running').length,
+      queued: runSet.runs.filter(run => normalizeRunStatus(run.status) === 'pending').length,
+      failed: runSet.runs.filter(run => ['failed', 'cancelled'].includes(normalizeRunStatus(run.status))).length,
     }
     return (
       <div className="execution-page flex flex-col gap-4">
@@ -94,7 +282,7 @@ export function ExecutionCenter({ onNotify, onBackToRunSets, runSet }) {
               <div className="execution-job-stats grid grid-cols-4 gap-2.5 max-[680px]:grid-cols-2 max-[420px]:grid-cols-1">
                 <JobStat tone="complete" label="Completed" value={counts.completed} detail={`of ${runSet.runs.length} runs`} />
                 <JobStat tone="running" label="Running" value={counts.running} detail="runs" />
-                <JobStat tone="queued" label="Queued" value={counts.queued} detail="runs" />
+                <JobStat tone="queued" label="Pending" value={counts.queued} detail="runs" />
                 <JobStat tone="recovery" label="Failed" value={counts.failed} detail="runs" />
               </div>
             </section>
@@ -103,18 +291,20 @@ export function ExecutionCenter({ onNotify, onBackToRunSets, runSet }) {
               <div className="execution-card-heading">
                 <div><h2>Individual run progress</h2><p>One run is created for every Projection Set/scenario pairing.</p></div>
               </div>
+              {retryRunId && <p className="execution-retry-notice" role="status">Retry submitted as <b>{retryRunId}</b>. The new run is shown below.</p>}
               <div className="execution-runset-runs">
                 {runSet.runs.map(run => (
-                  <article className="execution-runset-run" key={run.id}>
+                  <article className={`execution-runset-run${run.id === retryRunId ? ' execution-runset-retried' : ''}`} id={`execution-run-${run.id}`} key={run.id}>
                     <div className="execution-runset-run-heading">
-                      <div><b>{run.projectionSetName}</b><small>{run.scenarioName} · {run.id}</small></div>
-                      <span className={`execution-runset-status execution-runset-${run.status.toLowerCase()}`}>{run.status}</span>
+                      <div><b>{run.projectionSetName}</b><small>{run.scenarioName} · {run.id}</small>{run.retriedFromRunId && <small>Retry of {run.retriedFromRunId}</small>}</div>
+                      <div className="flex items-center gap-2"><span className={`execution-runset-status execution-runset-${normalizeRunStatus(run.status)}`}>{labelForRunStatus(run.status)}</span>{Boolean(run.canCancel) && <button className="execution-run-control" disabled={busyRunAction?.runId === run.id} onClick={() => void handleRunAction(run.id, 'cancel')}>{busyRunAction?.runId === run.id && busyRunAction.action === 'cancel' ? 'Cancelling…' : 'Cancel'}</button>}{Boolean(run.canRetry) && <button className="execution-run-control" disabled={busyRunAction?.runId === run.id} onClick={() => void handleRunAction(run.id, 'retry')}>{busyRunAction?.runId === run.id && busyRunAction.action === 'retry' ? 'Retrying…' : 'Retry'}</button>}<button className="execution-run-control" onClick={() => void viewRunEvidence(run.id)}>{evidence?.runId === run.id ? 'Refresh evidence' : 'View run evidence'}</button></div>
                     </div>
                     <div className="execution-runset-progress">
                       <div className="execution-runset-progress-track"><span style={{ width: `${run.progress.percent}%` }} /></div>
-                      <b>{run.status === 'Queued' && run.progress.total === 0 ? 'Waiting for worker' : `${run.progress.done.toLocaleString()} / ${run.progress.total.toLocaleString()} ${run.progress.unit} · ${run.progress.percent}%`}</b>
+                      <b>{normalizeRunStatus(run.status) === 'pending' && run.progress.total === 0 ? 'Waiting for worker' : `${run.progress.done.toLocaleString()} / ${run.progress.total.toLocaleString()} ${run.progress.unit} · ${run.progress.percent}%`}</b>
                       {run.progress.eta_seconds != null && <small>ETA {Math.ceil(run.progress.eta_seconds / 60)} min</small>}
                     </div>
+                    {evidence?.runId === run.id && <RunEvidencePanel evidence={evidence} onClose={() => setEvidence(null)} />}
                     <details className="execution-runset-events">
                       <summary><FileText size={14} />Events and logs ({run.events.length})</summary>
                       {run.events.map(event => <p key={event.id} className={`execution-runset-event execution-event-${event.level}`}><time>{new Date(event.timestamp).toLocaleTimeString()}</time><b>{event.step}</b><span>{event.message}</span></p>)}
@@ -139,7 +329,7 @@ export function ExecutionCenter({ onNotify, onBackToRunSets, runSet }) {
               </div>
               <div className="execution-provenance-footer">
                 <span><ShieldCheck size={16} />Each run corresponds to one immutable Projection Set/scenario pairing. Events and progress are per run.</span>
-                <button onClick={() => onNotify('Run Set package details will be available from the backend')}>View package details</button>
+                {runSet.runs[0] && <button onClick={() => void viewRunEvidence(runSet.runs[0].id)}>View run evidence</button>}
               </div>
             </section>
           </main>
@@ -187,7 +377,7 @@ export function ExecutionCenter({ onNotify, onBackToRunSets, runSet }) {
             <div className="execution-job-stats grid grid-cols-4 gap-2.5 max-[680px]:grid-cols-2 max-[420px]:grid-cols-1">
               <JobStat tone="complete" label="Completed" value={completedJobs} detail="of 24 jobs" />
               <JobStat tone="running" label="Running" value={runningJobs} detail="job" />
-              <JobStat tone="queued" label="Queued" value={queuedJobs} detail="jobs" />
+              <JobStat tone="queued" label="Pending" value={pendingJobs} detail="jobs" />
               <JobStat tone="recovery" label="Needs recovery" value="0" detail="jobs" />
             </div>
           </section>
@@ -263,7 +453,7 @@ function ExecutionTimeline({ status }) {
       <div className="execution-timeline-track">
         {executionSteps.map((step, index) => {
           const stepState = status === 'Cancelled' && step.state !== 'Completed'
-            ? 'Queued'
+            ? 'Pending'
             : status === 'Paused' && step.state === 'Running'
               ? 'Paused'
               : step.state
@@ -273,7 +463,7 @@ function ExecutionTimeline({ status }) {
               <span className="execution-timeline-dot">{stepState === 'Completed' ? <Check size={12} /> : null}</span>
               {index < executionSteps.length - 1 && <i className="execution-timeline-connector" />}
               <b>{step.name}</b>
-              <small>{stepState === 'Completed' ? '✓ Completed' : stepState === 'Running' ? '◉ Running' : stepState === 'Paused' ? 'Ⅱ Paused' : '◷ Queued'}</small>
+              <small>{stepState === 'Completed' ? '✓ Completed' : stepState === 'Running' ? '◉ Running' : stepState === 'Paused' ? 'Ⅱ Paused' : '◷ Pending'}</small>
             </div>
           )
         })}
@@ -283,12 +473,12 @@ function ExecutionTimeline({ status }) {
 }
 
 function ComputeResources({ status = 'Running' }) {
-  const isQueued = status === 'Queued'
+  const isPending = status === 'Pending'
   return (
     <section className="execution-side-card rounded-[10px] bg-white p-4">
       <h2>Compute resources</h2>
-      <ResourceRow icon={<Cpu size={17} />} title="GPU" detail={isQueued ? 'Allocation pending' : 'NVIDIA A10G'} state={isQueued ? 'Queued' : 'Active'} />
-      <ResourceRow icon={<Server size={17} />} title="CPU" detail={isQueued ? 'Allocation pending' : '64 vCPU'} state={isQueued ? 'Queued' : 'In use'} />
+      <ResourceRow icon={<Cpu size={17} />} title="GPU" detail={isPending ? 'Allocation pending' : 'NVIDIA A10G'} state={isPending ? 'Pending' : 'Active'} />
+      <ResourceRow icon={<Server size={17} />} title="CPU" detail={isPending ? 'Allocation pending' : '64 vCPU'} state={isPending ? 'Pending' : 'In use'} />
     </section>
   )
 }

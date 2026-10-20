@@ -28,9 +28,11 @@ import {
   Table2,
 } from 'lucide-react'
 import './reserve-investigation.css'
-import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
+
+const EMPTY_RUNS = []
+const EMPTY_OUTPUTS = []
 
 const investigationRuns = [
   { id: 'RUN-20261231-001', project: 'MYGA', model: 'Base', projectionSet: 'Base scenario', status: 'Completed', traceCaptured: true, policies: '248,310', completed: 'Dec 31, 2026', time: '10:14 AM', retention: '12 months (until Dec 31, 2027)' },
@@ -46,7 +48,7 @@ const traceNodes = [
 ]
 
 const mentorPrompts = [
-  'Why did net reserve change?',
+  'Trace a value',
   'Trace the lapse driver',
   'Compare scenarios',
   'Show sensitivity',
@@ -251,7 +253,7 @@ function TraceExplorerView({ onNotify, onBackToRuns }) {
           <section className="trace-explorer-card investigation-card col-span-2 max-[600px]:col-span-1">
             <div className="investigation-card-heading">
               <div className="investigation-heading-icon"><Sparkles size={22} /></div>
-              <div><h2>Trace Explorer</h2><p>Follow the full calculation path. Click a node to see details, values, and source.</p></div>
+              <div><h2>Trace a value</h2><p>Follow the full calculation path. Click a node to see details, values, and source.</p></div>
               <button className="trace-view-options" onClick={onBackToRuns}>Change run</button>
               <button className="trace-view-options" onClick={() => onNotify('Trace view options opened')}>View options</button>
               <button aria-label="Open trace view" className="trace-expand-button" onClick={() => onNotify('Trace expanded')}><ExternalLink size={16} /></button>
@@ -388,7 +390,7 @@ function MentorPanel({ answer, isOpen, question, onQuestionChange, onAsk, onTogg
         <div className="mentor-content">
           <div className="mentor-question-card">
             <span><Sparkles size={21} /></span>
-            <div><b>Why did net reserve change?</b><small>MYGA Base · 2026-12-31 · Run JR-20261231-001</small></div>
+            <div><b>Trace a value</b><small>Selected run · captured trace</small></div>
           </div>
 
           <article className="mentor-answer-card">
@@ -434,8 +436,9 @@ function ShieldIcon() {
 function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   const { projectId, project } = useWorkspace()
   const query = useApiQuery(projectId ? `/v1/runs?project_id=${encodeURIComponent(projectId)}&limit=200` : null)
-  const runs = query.data?.runs ?? []
+  const runs = query.data?.runs ?? EMPTY_RUNS
   const [selectedRunId, setSelectedRunId] = useState('')
+  const [partialApprovalRunId, setPartialApprovalRunId] = useState(null)
   const [runSearch, setRunSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('Completed')
   const [modelFilter, setModelFilter] = useState('All versions')
@@ -446,11 +449,15 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   const [traceDepth, setTraceDepth] = useState(4)
   const selectedRun = runs.find(run => run.id === selectedRunId) ?? runs[0] ?? null
   const completed = selectedRun && ['success', 'partial_success'].includes(selectedRun.status)
-  const policiesQuery = useApiQuery(completed ? `/v1/runs/${selectedRun.id}/trace/policies` : null)
+  const isPartialRun = selectedRun?.status === 'partial_success'
+  const includePartial = Boolean(selectedRun && partialApprovalRunId === selectedRun.id)
+  const policiesQuery = useApiQuery(completed && (!isPartialRun || includePartial)
+    ? `/v1/runs/${selectedRun.id}/trace/policies${isPartialRun && includePartial ? '?include_partial=true' : ''}`
+    : null)
   const versionId = selectedRun?.model_version?.id
   const outputsQuery = useApiQuery(versionId ? `/v1/model-versions/${versionId}/published-outputs` : null)
-  const tracedPolicies = policiesQuery.data?.policy_ids ?? []
-  const outputs = outputsQuery.data?.outputs ?? []
+  const tracedPolicies = policiesQuery.data?.policy_ids ?? EMPTY_RUNS
+  const outputs = outputsQuery.data?.outputs ?? EMPTY_OUTPUTS
   const modelOptions = Array.from(new Set(runs.map(run => `${run.model_version?.model_name ?? 'Model'} ${run.model_version?.version_label ?? ''}`.trim())))
   const projectionOptions = Array.from(new Set(runs.map(run => run.projection_set?.name).filter(Boolean)))
   useEffect(() => {
@@ -462,9 +469,11 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   useEffect(() => { setPolicy(''); setMonth(0); setVariable('') }, [selectedRunId])
   const visibleRuns = runs.filter(run => {
     const searchable = `${run.name} ${run.id} ${run.model_version?.model_name ?? ''} ${run.projection_set?.name ?? ''} ${run.scenario?.name ?? ''}`.toLowerCase()
-    const isCompleted = ['success', 'partial_success'].includes(run.status)
+    const matchesStatus = statusFilter === 'All statuses'
+      || (statusFilter === 'Completed' && run.status === 'success')
+      || (statusFilter === 'Partial success' && run.status === 'partial_success')
     const modelName = `${run.model_version?.model_name ?? 'Model'} ${run.model_version?.version_label ?? ''}`.trim()
-    return searchable.includes(runSearch.trim().toLowerCase()) && (statusFilter === 'All statuses' || isCompleted)
+    return searchable.includes(runSearch.trim().toLowerCase()) && matchesStatus
       && (modelFilter === 'All versions' || modelName === modelFilter)
       && (projectionFilter === 'All sets' || run.projection_set?.name === projectionFilter)
   })
@@ -475,7 +484,7 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   return (
     <div className="investigation-selector-page">
       <header className="investigation-selector-heading">
-        <div><span>INVESTIGATE / NEW INVESTIGATION</span><h2>Start an investigation</h2><p>Choose a completed run, a policy, month, and variable with captured trace data.</p></div>
+        <div><span>INVESTIGATE / NEW INVESTIGATION</span><h2>Start an investigation</h2><p>Choose a successful run or explicitly include an incomplete run, then select a policy, month, and variable with captured trace data.</p></div>
         <div className="investigation-selector-actions">
           <button onClick={() => document.getElementById('investigation-run-search')?.focus()}><Search size={17} />Search</button>
           <button disabled={!selectedRun} onClick={() => { void navigator.clipboard?.writeText(selectedRun.id); onNotify('Run ID copied') }}><Share2 size={17} />Copy run ID</button>
@@ -485,13 +494,13 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
       <div className="investigation-selector-layout">
         <main className="investigation-selector-main">
           <section className="investigation-step-card investigation-run-step">
-            <div className="investigation-step-heading"><span className="investigation-step-number investigation-step-ready">1</span><div><h3>Select run</h3><p>Choose a completed run with captured trace data.</p></div><button className="investigation-run-details" disabled={!selectedRun} onClick={() => onNotify(selectedRun ? `Run ${selectedRun.id} · ${selectedRun.status} · ${selectedRun.progress?.done ?? 0}/${selectedRun.progress?.total ?? 0} policies` : 'Select a run first')}>View run details <ArrowRight size={17} /></button></div>
+            <div className="investigation-step-heading"><span className="investigation-step-number investigation-step-ready">1</span><div><h3>Select run</h3><p>Choose a successful run, or a partial-success run after opting in to its incomplete results.</p></div><button className="investigation-run-details" disabled={!selectedRun} onClick={() => onNotify(selectedRun ? `Run ${selectedRun.id} · ${selectedRun.status} · ${selectedRun.progress?.done ?? 0}/${selectedRun.progress?.total ?? 0} policies` : 'Select a run first')}>View run details <ArrowRight size={17} /></button></div>
             <div className="investigation-run-filters">
               <label className="investigation-run-search"><Search size={18} /><input id="investigation-run-search" onChange={event => setRunSearch(event.target.value)} placeholder="Search runs..." value={runSearch} /></label>
               <InvestigationFilter label="Project" value={project?.name ?? 'Current project'} onChange={() => {}} options={[project?.name ?? 'Current project']} />
               <InvestigationFilter label="Model version" value={modelFilter} onChange={setModelFilter} options={['All versions', ...modelOptions]} />
               <InvestigationFilter label="Projection set" value={projectionFilter} onChange={setProjectionFilter} options={['All sets', ...projectionOptions]} />
-              <InvestigationFilter label="Status" value={statusFilter} onChange={setStatusFilter} options={['Completed', 'All statuses']} />
+              <InvestigationFilter label="Status" value={statusFilter} onChange={setStatusFilter} options={['Completed', 'Partial success', 'All statuses']} />
             </div>
             <div className="investigation-runs-table-wrap"><table className="investigation-runs-table"><thead><tr><th aria-label="Selected"/><th>Run name <ArrowDownSortIcon/></th><th>Project</th><th>Model version</th><th>Status</th><th>Trace</th><th>Policies</th><th>Completed</th></tr></thead><tbody>
               {query.loading && <tr><td className="investigation-empty-runs" colSpan="8">Loading runs from the backend…</td></tr>}
@@ -499,11 +508,12 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
               {!query.loading && !query.error && visibleRuns.map(run => <tr className={selectedRun?.id === run.id ? 'investigation-run-selected' : ''} key={run.id} onClick={() => selectRun(run)}>
                 <td><button className="investigation-run-radio" aria-label={`Select ${run.id}`} aria-pressed={selectedRun?.id === run.id} onClick={event => { event.stopPropagation(); selectRun(run) }}>{selectedRun?.id === run.id ? <CircleCheck size={20}/> : <Circle size={20}/>}</button></td>
                 <td>{run.name || run.id}</td><td>{project?.name ?? '—'}</td><td>{`${run.model_version?.model_name ?? '—'} ${run.model_version?.version_label ?? ''}`}</td>
-                <td><span className="investigation-run-status">{run.status}</span></td><td><span className={run.summary?.trace?.captured ? 'investigation-trace-yes' : 'investigation-trace-no'}>{run.summary?.trace?.captured ? <CircleCheck size={20}/> : <CircleMinus size={20}/>} {run.summary?.trace?.captured ? 'Trace captured' : 'Check availability'}</span></td>
+                <td><span className="investigation-run-status">{run.status === 'partial_success' ? 'Partial success' : run.status === 'success' ? 'Completed' : run.status}</span></td><td><span className={run.summary?.trace?.captured ? 'investigation-trace-yes' : 'investigation-trace-no'}>{run.summary?.trace?.captured ? <CircleCheck size={20}/> : <CircleMinus size={20}/>} {run.summary?.trace?.captured ? 'Trace captured' : 'Check availability'}</span></td>
                 <td>{(run.progress?.total ?? 0).toLocaleString()}</td><td><span className="investigation-completed-date">{run.completed_at ? new Date(run.completed_at).toLocaleDateString() : '—'}<small>{run.completed_at ? new Date(run.completed_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''}</small></span></td>
               </tr>)}
-              {!query.loading && !query.error && visibleRuns.length === 0 && <tr><td className="investigation-empty-runs" colSpan="8">No completed runs match these filters.</td></tr>}
+              {!query.loading && !query.error && visibleRuns.length === 0 && <tr><td className="investigation-empty-runs" colSpan="8">No runs match these filters.</td></tr>}
             </tbody></table></div><p className="investigation-run-count">Showing {visibleRuns.length} of {runs.length} backend runs</p>
+            {isPartialRun && <section className="result-panel rounded-[10px] bg-[#fff7df] p-4" role="alert"><b>This run is incomplete.</b><p>Trace results require the same incomplete-results choice as other run results. {includePartial ? 'Incomplete trace data is included for the selected run.' : 'Captured trace data remains hidden until you opt in.'}</p>{!includePartial && <button className="button button-primary" onClick={() => setPartialApprovalRunId(selectedRun.id)}>Show incomplete results</button>}</section>}
           </section>
           <section className="investigation-step-card investigation-target-step">
             <div className="investigation-step-heading"><span className={`investigation-step-number ${canOpenTrace ? 'investigation-step-ready' : ''}`}>2</span><div><h3>Select trace target</h3><p>Choose the policy, month, and variable to investigate.</p></div></div>
@@ -513,7 +523,7 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
               <label>Variable<div className="investigation-input-wrap"><Database size={18}/><select disabled={!outputs.length} onChange={event => setVariable(event.target.value)} value={variable}>{outputs.map(item => <option key={item.variable_name} value={item.variable_name}>{item.display_name || item.variable_name}</option>)}</select><ChevronDown size={16}/></div><small>{outputsQuery.loading ? 'Loading model outputs…' : outputs.length ? 'Select a published output from this model version.' : 'No published outputs are configured.'}</small></label>
               <label>Trace depth<div className="investigation-input-wrap"><TraceTreeIcon/><select onChange={event => setTraceDepth(Number(event.target.value))} value={traceDepth}>{[1,2,3,4,5,6,7,8,9,10].map(level => <option key={level} value={level}>{level} levels</option>)}</select><ChevronDown size={16}/></div><small>Maximum supported depth: 10.</small></label>
             </div>
-            <div className="investigation-target-footer"><button className="investigation-cancel-button" onClick={() => { setPolicy(''); onNotify('Investigation target cleared') }}>Clear target</button><div><button className="investigation-open-trace" disabled={!canOpenTrace} onClick={() => onOpenTrace({run:selectedRun, policyId:policy.trim(), month, variable, depth:traceDepth})}><Play size={17}/>Open Trace Explorer</button><small>{canOpenTrace ? `Ready to trace ${variable} for policy ${policy.trim()}.` : 'Select a traced policy, published output, and valid month to continue.'}</small></div></div>
+            <div className="investigation-target-footer"><button className="investigation-cancel-button" onClick={() => { setPolicy(''); onNotify('Investigation target cleared') }}>Clear target</button><div><button className="investigation-open-trace" disabled={!canOpenTrace} onClick={() => onOpenTrace({run:selectedRun, policyId:policy.trim(), month, variable, depth:traceDepth, includePartial: isPartialRun && includePartial})}><Play size={17}/>Open Trace Explorer</button><small>{canOpenTrace ? `Ready to trace ${variable} for policy ${policy.trim()}.${isPartialRun ? ' Incomplete run data is included.' : ''}` : 'Select a traced policy, published output, and valid month to continue.'}</small></div></div>
           </section>
         </main>
         <aside className="investigation-availability-panel"><section className="investigation-trace-availability"><header><Database size={29}/><div><h3>Trace availability</h3><p>Availability is queried from captured run data.</p></div></header>
@@ -526,8 +536,7 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
 }
 
 function LiveTraceExplorerView({ target, onNotify, onBack }) {
-  const { request } = useApi()
-  const tracePath = `/v1/runs/${encodeURIComponent(target.run.id)}/trace?policy_id=${encodeURIComponent(target.policyId)}&month=${target.month}&variable=${encodeURIComponent(target.variable)}&depth=${target.depth}`
+  const tracePath = `/v1/runs/${encodeURIComponent(target.run.id)}/trace?policy_id=${encodeURIComponent(target.policyId)}&month=${target.month}&variable=${encodeURIComponent(target.variable)}&depth=${target.depth}${target.includePartial ? '&include_partial=true' : ''}`
   const traceQuery = useApiQuery(tracePath)
   const root = traceQuery.data?.root
   const nodes = root ? flattenTrace(root) : []
@@ -535,6 +544,10 @@ function LiveTraceExplorerView({ target, onNotify, onBack }) {
   const [checkpoints, setCheckpoints] = useState([])
   useEffect(() => setSelectedIndex(0), [tracePath])
   const selected = nodes[selectedIndex] ?? nodes[0]
+  const dependentsPath = selected?.variable
+    ? `/v1/runs/${encodeURIComponent(target.run.id)}/trace/dependents?policy_id=${encodeURIComponent(target.policyId)}&month=${selected.month ?? target.month}&variable=${encodeURIComponent(selected.variable)}${target.includePartial ? '&include_partial=true' : ''}`
+    : null
+  const dependentsQuery = useApiQuery(dependentsPath)
   const addCheckpoint = () => {
     if (!selected) return
     if (checkpoints.some(item => item.title === selected.name)) { onNotify(`${selected.name} is already pinned`); return }
@@ -543,12 +556,14 @@ function LiveTraceExplorerView({ target, onNotify, onBack }) {
   }
   return <div className="reserve-investigation-page"><div className="investigation-main-grid grid grid-cols-[minmax(0,1.9fr)_minmax(340px,1fr)] items-start gap-3 max-[1000px]:grid-cols-1">
     <main className="investigation-workbench grid min-w-0 grid-cols-2 items-start gap-3 max-[600px]:grid-cols-1">
-      <section className="trace-explorer-card investigation-card col-span-2 max-[600px]:col-span-1"><div className="investigation-card-heading"><div className="investigation-heading-icon"><Sparkles size={22}/></div><div><h2>Trace Explorer</h2><p>Captured calculation path from the selected backend run.</p></div><button className="trace-view-options" onClick={onBack}>Change run</button><button className="trace-view-options" onClick={() => onNotify('Trace data is read-only evidence captured during execution.')}>View options</button><button aria-label="Copy trace request" className="trace-expand-button" onClick={() => { void navigator.clipboard?.writeText(tracePath); onNotify('Trace request copied') }}><ExternalLink size={16}/></button></div>
+      <section className="trace-explorer-card investigation-card col-span-2 max-[600px]:col-span-1"><div className="investigation-card-heading"><div className="investigation-heading-icon"><Sparkles size={22}/></div><div><h2>Trace a value</h2><p>Captured calculation path from the selected backend run.</p></div><button className="trace-view-options" onClick={onBack}>Change run</button><button className="trace-view-options" onClick={() => onNotify('Trace data is read-only evidence captured during execution.')}>View options</button><button aria-label="Copy trace request" className="trace-expand-button" onClick={() => { void navigator.clipboard?.writeText(tracePath); onNotify('Trace request copied') }}><ExternalLink size={16}/></button></div>
         {traceQuery.loading ? <div className="trace-graph-surface">Loading captured trace…</div> : traceQuery.error ? <div className="trace-graph-surface">Could not load trace: {traceQuery.error.message}</div> : nodes.length ? <div className="trace-graph-surface"><div className="trace-connectors" aria-hidden="true"><i/><i/><i/></div><div className="trace-node-grid">{nodes.map((node,index) => <div className="trace-node-column" key={node.id}><button aria-pressed={selectedIndex===index} className={`trace-node-card trace-node-${traceKind(node.kind)} ${selectedIndex===index?'trace-node-selected':''}`} onClick={() => setSelectedIndex(index)}><span>{traceIcon(node.kind)}</span><small>{node.kind}</small><b>{node.name}</b><em>{displayTraceValue(node.value,node.unit)}</em></button><span className="trace-node-action"><Database size={12}/>{node.source?.type || node.formula?.function_ref || 'Captured value'}</span>{index<nodes.length-1&&<ArrowRight className="trace-inline-arrow" size={17}/>}</div>)}</div></div> : <div className="trace-graph-surface">The trace response did not contain a calculation tree.</div>}
         {root && <p className="investigation-run-count">Run {target.run.id} · Policy {target.policyId} · Month {target.month} · {traceQuery.data?.illustrative ? 'Illustrative run' : 'Run output'}{traceQuery.data?.period_end_date ? ` · ${traceQuery.data.period_end_date}` : ''}</p>}
       </section>
       <PinnedCheckpoints checkpoints={checkpoints} onAdd={addCheckpoint} onRemove={id=>setCheckpoints(items=>items.filter(item=>item.id!==id))} onNotify={onNotify}/>
-      <section className="investigation-card scratchpad-card"><div className="investigation-card-heading scratchpad-heading"><Code2 size={20}/><h2>Scratchpad</h2><button disabled>Unavailable</button></div><article className="scratchpad-linked-card"><div className="scratchpad-block-heading"><span><Link2 size={14}/>Selected trace node</span><small>Read-only evidence</small></div><div className="scratchpad-linked-value"><span><Database size={17}/></span><div><b>{selected?.name || 'Select a trace node'}</b><small>{selected?.kind || '—'} · {selected ? displayTraceValue(selected.value,selected.unit) : '—'}</small></div><strong>{selected?.value == null ? '—' : displayTraceValue(selected.value,selected.unit)}</strong></div></article><p className="investigation-run-count">Scenario experimentation is not exposed by the current backend; no simulated result is shown here.</p></section>
+      <section className="investigation-card scratchpad-card"><div className="investigation-card-heading scratchpad-heading"><Code2 size={20}/><h2>Scratchpad</h2><button disabled>Unavailable</button></div><article className="scratchpad-linked-card"><div className="scratchpad-block-heading"><span><Link2 size={14}/>Selected trace node</span><small>Read-only evidence</small></div><div className="scratchpad-linked-value"><span><Database size={17}/></span><div><b>{selected?.name || 'Select a trace node'}</b><small>{selected?.kind || '—'} · {selected ? displayTraceValue(selected.value,selected.unit) : '—'}</small></div><strong>{selected?.value == null ? '—' : displayTraceValue(selected.value,selected.unit)}</strong></div></article>
+        <section className="trace-dependents-panel"><h3>What depends on this value?</h3>{dependentsQuery.loading && <p>Loading downstream dependents…</p>}{dependentsQuery.error && <p role="alert">Could not load dependents: {dependentsQuery.error.message}</p>}{dependentsQuery.data && !(dependentsQuery.data.dependents ?? []).length && <p>No downstream dependents were reported for this value.</p>}{(dependentsQuery.data?.dependents ?? []).map((dependent, index) => <article key={`${dependent.variable}-${dependent.month}-${index}`}><b>{dependent.variable}</b><span>{dependent.kind} · month {dependent.month} · {dependent.value == null ? 'No value' : displayTraceValue(dependent.value, selected?.unit)}{dependent.formula_id ? ` · formula ${dependent.formula_id}` : ''}</span></article>)}</section>
+        <p className="investigation-run-count">Scenario experimentation is not exposed by the current backend; no simulated result is shown here.</p></section>
     </main>
     <aside className="investigation-card mentor-investigation-card"><div className="investigation-card-heading mentor-heading"><span className="mentor-heading-icon"><Sparkles size={18}/></span><div><h2>Trace evidence</h2><small>Backend-captured values</small></div></div><div className="mentor-content"><div className="mentor-question-card"><span><Activity size={21}/></span><div><b>{root?.display_name || root?.variable || target.variable}</b><small>{target.run.name || target.run.id} · Policy {target.policyId} · Month {target.month}</small></div></div><article className="mentor-answer-card"><div className="mentor-answer-heading"><span><Check size={13}/>Verified trace facts</span></div><p>{root ? `${displayTraceValue(root.value,root.unit)}${root.period_end_date ? ` at ${root.period_end_date}` : ''}` : traceQuery.loading ? 'Loading evidence…' : 'Trace evidence is unavailable.'}</p><div className="mentor-citations"><span>Run ID: {target.run.id}</span><span>Captured nodes: {nodes.length}</span><span>{traceQuery.data?.illustrative ? 'Illustrative' : 'Backend result'}</span></div></article>{selected && <article className="mentor-interpretation-card"><div className="mentor-answer-heading"><span><Database size={13}/>Selected node source</span></div><p>{selected.source ? JSON.stringify(selected.source) : selected.formula?.expression_text || selected.formula?.function_ref || 'No source details recorded for this node.'}</p></article>}<div className="mentor-guardrail"><ShieldIcon/><span><b>Read-only investigation</b><small>This view reports recorded run evidence. It does not infer causal attribution or mutate model settings.</small></span></div></div></aside>
   </div></div>
@@ -556,7 +571,7 @@ function LiveTraceExplorerView({ target, onNotify, onBack }) {
 
 function flattenTrace(root) {
   const result=[]
-  const visit=(node,path='root')=>{ if(!node)return; const id=`${path}:${node.variable}:${node.month}`; result.push({id,name:node.display_name||node.variable,value:node.value,unit:node.unit,kind:node.kind,source:node.source,formula:node.formula,depth:path.split('.').length-1}); (node.children||[]).forEach((child,index)=>visit(child,`${path}.${index}`)) }
+  const visit=(node,path='root')=>{ if(!node)return; const id=`${path}:${node.variable}:${node.month}`; result.push({id,name:node.display_name||node.variable,variable:node.variable,month:node.month,value:node.value,unit:node.unit,kind:node.kind,source:node.source,formula:node.formula,depth:path.split('.').length-1}); (node.children||[]).forEach((child,index)=>visit(child,`${path}.${index}`)) }
   visit(root)
   return result
 }
