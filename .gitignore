@@ -28,3 +28,10 @@ FUNCTIONALITY_IDLE_LINKS_AUDIT.md
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright & npm cache
+.npm-cache
+test-results
+playwright-report
+blob-report
+playwright/.cache
