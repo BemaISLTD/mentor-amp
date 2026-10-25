@@ -30,12 +30,13 @@ import { StatusBadge } from '../../components/ui/StatusBadge'
 import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
+import { IllustrativeBadge } from '../../components/ui/IllustrativeBadge'
 import './results-explorer.css'
 
 const resultTabs = ['Results Explorer', 'Run History', 'Compare runs', 'Driver / Variance']
 
 export function ResultsExplorer({ onNotify, onCompareChange }) {
-  const { projectId } = useWorkspace()
+  const { projectId, activeProduct } = useWorkspace()
   const { baseUrl, token } = useApi()
   const [view, setView] = useState('Results Explorer')
   const [metric, setMetric] = useState('Net reserve')
@@ -45,8 +46,12 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
   const [approvedPartialRunIds, setApprovedPartialRunIds] = useState(() => new Set())
   const runsQuery = useApiQuery(`/v1/runs?project_id=${encodeURIComponent(projectId ?? '')}&limit=100`, 5000)
   const runs = runsQuery.data?.runs ?? []
-  const runsWithResults = runs.filter((run) => run.results_available)
+  const productForRun = (run) => run?.product_code ?? run?.model_version?.product_code ?? run?.model?.product_code ?? run?.projection_set?.product_code ?? run?.projection_set?.model_version?.product_code
+  const productRuns = activeProduct === 'All' ? runs : runs.filter(run => productForRun(run) === activeProduct)
+  const runsWithResults = productRuns.filter((run) => run.results_available)
   const selectedRun = runsWithResults.find((run) => run.id === runId) ?? runsWithResults[0]
+  const selectedProduct = productForRun(selectedRun) ?? selectedRun?.summary?.product_code
+  const showMygaMetrics = activeProduct === 'MYGA' || selectedProduct === 'MYGA'
   const baselineRun = runsWithResults.find((run) => run.id === baselineId) ?? runsWithResults[1] ?? runsWithResults[0]
   const currentRun = runsWithResults.find((run) => run.id === currentId) ?? runsWithResults[0]
   const selectedBaselineId = baselineRun?.id ?? ''
@@ -60,7 +65,7 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
   const comparisonNeedsApproval = unapprovedComparisonRuns.length > 0
   const comparisonUsesPartial = partialComparisonRuns.length > 0 && !comparisonNeedsApproval
   const selectedIncludePartial = selectedIsPartial && selectedPartialApproved
-  const summaryQuery = useApiQuery(selectedRun && !selectedPartialNeedsApproval ? `/v1/runs/${selectedRun.id}/summary${selectedIncludePartial ? '?include_partial=true' : ''}` : null, 5000)
+  const summaryQuery = useApiQuery(selectedRun ? `/v1/runs/${selectedRun.id}/summary` : null, 5000)
   const aggregateQuery = useApiQuery(selectedRun && !selectedPartialNeedsApproval ? `/v1/runs/${selectedRun.id}/aggregates?group_by=projection_year${selectedIncludePartial ? '&include_partial=true' : ''}` : null, 5000)
   const comparisonQuery = useApiQuery(selectedBaselineId && selectedCurrentId && selectedBaselineId !== selectedCurrentId && !comparisonNeedsApproval ? `/v1/comparisons?baseline_run_id=${encodeURIComponent(selectedBaselineId)}&current_run_id=${encodeURIComponent(selectedCurrentId)}${comparisonUsesPartial ? '&include_partial=true' : ''}` : null)
   const summary = summaryQuery.data
@@ -99,8 +104,8 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
       link.click()
       URL.revokeObjectURL(url)
       onNotify(completeHeader?.toLowerCase() === 'false'
-        ? 'Backend results CSV downloaded; the backend marked the data incomplete.'
-        : 'Backend results CSV downloaded')
+        ? `Backend results CSV downloaded; the backend marked the data incomplete.${summary?.illustrative ? ' This output is illustrative, not for statutory filing.' : ''}`
+        : `Backend results CSV downloaded${summary?.illustrative ? '; this output is illustrative, not for statutory filing.' : ''}`)
     } catch (error) { onNotify(error instanceof Error ? error.message : 'Could not export run results') }
   }
 
@@ -130,7 +135,8 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
           {runsQuery.loading && 'Loading live runs…'}
           {runsQuery.error && `Could not load runs: ${runsQuery.error.message}`}
           {!runsQuery.loading && !runsQuery.error && !runs.length && 'No runs are available for this project yet. Results, comparisons, and exports will appear when backend runs are available.'}
-          {!runsQuery.loading && !runsQuery.error && runs.length > 0 && !runsWithResults.length && 'Runs are available, but none has result data yet. Results, comparisons, and exports will appear after a run produces results.'}
+          {!runsQuery.loading && !runsQuery.error && activeProduct !== 'All' && !productRuns.length && `No runs are identified as ${activeProduct} for this project.`}
+          {!runsQuery.loading && !runsQuery.error && productRuns.length > 0 && !runsWithResults.length && 'Runs are available, but none has result data yet. Results, comparisons, and exports will appear after a run produces results.'}
         </section>
       )}
 
@@ -140,7 +146,7 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
             <>
               {summaryQuery.error && <section className="result-panel rounded-[10px] bg-white p-4" role="alert">Could not load the selected run summary: {summaryQuery.error.message}</section>}
               {aggregateQuery.error && <section className="result-panel rounded-[10px] bg-white p-4" role="alert">Could not load the selected run aggregates: {aggregateQuery.error.message}</section>}
-              <ExplorerView metric={metric} setMetric={setMetric} run={selectedRun} summary={summary} aggregate={aggregate} summaryLoading={summaryQuery.loading} aggregateLoading={aggregateQuery.loading} comparison={comparison} formatValue={formatValue} onNotify={onNotify} includePartial={!selectedPartialNeedsApproval} />
+              <ExplorerView metric={metric} setMetric={setMetric} run={selectedRun} summary={summary} aggregate={aggregate} summaryLoading={summaryQuery.loading} aggregateLoading={aggregateQuery.loading} comparison={comparison} formatValue={formatValue} onNotify={onNotify} includePartial={!selectedPartialNeedsApproval} showMygaMetrics={showMygaMetrics} />
             </>
           )}
           {view === 'Run History' && <RunHistoryView projectId={projectId} onSelect={(run) => { setRunId(run.id); setView('Results Explorer') }} scenarioName={scenarioName} statusText={statusText} />}
@@ -188,7 +194,7 @@ export function ResultsExplorer({ onNotify, onCompareChange }) {
     </div>
   )
 }
-function ExplorerView({ metric, setMetric, run, summary, aggregate, summaryLoading, aggregateLoading, comparison, formatValue, onNotify, includePartial }) {
+function ExplorerView({ metric, setMetric, run, summary, aggregate, summaryLoading, aggregateLoading, comparison, formatValue, onNotify, includePartial, showMygaMetrics }) {
   const variables = aggregate?.variables ?? []
   const needle = metric.toLowerCase().replace(/[^a-z]/g, '')
   const selectedVariable = variables.find((item) => `${item.name} ${item.display_name}`.toLowerCase().replace(/[^a-z]/g, '').includes(needle)) ?? variables[0]
@@ -201,6 +207,20 @@ function ExplorerView({ metric, setMetric, run, summary, aggregate, summaryLoadi
         <SmallMetric icon={<Target size={25} />} label="Outputs captured" value={summary?.output_variable_count ?? '—'} detail={summary ? `${summary.period_count ?? 0} periods · ${summary.output_row_count?.toLocaleString() ?? 0} rows` : summaryLoading ? 'Loading run summary' : 'No summary available'} />
         <SmallMetric icon={<GitBranch size={25} />} label="Trace coverage" value={summary?.trace?.captured ? `${summary.trace.captured_policy_count ?? 0}` : '—'} detail={summary?.trace?.mode ?? (summaryLoading ? 'Loading trace status' : 'Not captured')} />
       </section>
+      {showMygaMetrics && <section className="results-metric-row grid grid-cols-5 gap-3.5 max-[900px]:grid-cols-2 max-[520px]:grid-cols-1" aria-label="MYGA key results">
+        {[
+          ['Reserve', 'reserve'],
+          ['Liability outgo', 'liability_outgo'],
+          ['Surrender claims', 'surrender_claims'],
+          ['Death claims', 'death_claims'],
+          ['Maintenance expense', 'maintenance_expense'],
+        ].map(([label, key]) => {
+          const total = summary?.totals?.[key]
+          const value = typeof total === 'object' && total !== null ? total.value : total
+          const resolvedValue = key === 'reserve' && value == null ? summary?.headline?.value : value
+          return <SmallMetric key={key} icon={<Target size={20} />} label={label} value={resolvedValue == null ? '—' : formatValue(resolvedValue)} detail={summary?.results_available ? key.replaceAll('_', ' ') : summaryLoading ? 'Loading run summary' : 'Unavailable in this run summary'} />
+        })}
+      </section>}
       <ProjectionCard metric={metric} setMetric={setMetric} run={run} series={series} selectedVariable={selectedVariable} loading={aggregateLoading} formatValue={number} onNotify={onNotify} />
       {run && <PolicyResultsView key={run.id} run={run} includePartial={includePartial} />}
       <DriverContribution summary={summary} comparison={comparison} formatValue={formatValue} />
@@ -221,7 +241,7 @@ function MetricHero({ run, summary, loading, formatValue, series }) {
       <div className="flex min-w-0 flex-col items-start gap-2">
         <span className="text-[13px] text-white">{headline?.label ?? 'Run results'}</span>
         <strong className="text-[40px] font-bold leading-tight text-white max-[520px]:text-[32px]">{loading ? 'Loading…' : value}</strong>
-        <b className="text-[16px] text-[#9bfa00] max-[520px]:text-[15px]">{summary?.illustrative ? 'Illustrative backend output' : summary?.results_available ? 'Live backend results' : run ? 'No result rows available' : 'No run selected'}</b>
+        <b className="text-[16px] text-[#9bfa00] max-[520px]:text-[15px]">{summary?.illustrative ? <IllustrativeBadge /> : summary?.results_available ? 'Live backend results' : run ? 'No result rows available' : 'No run selected'}</b>
         <small className="text-[11px] text-[#cad5d0]">{run?.name ?? 'Select a backend run'}{headline?.as_of ? ` · ${headline.as_of}` : ''}</small>
       </div>
       <div className="result-sparkline flex w-[250px] shrink-0 flex-col items-start gap-3 max-[520px]:w-full">
@@ -343,9 +363,9 @@ function RunProvenance({ run, summary, statusText, onCompare, onExport, onNotify
       <h2 className="rail-eyebrow">Run provenance</h2>
       <p className="provenance-copy">Run {run?.name ?? '—'}<br />{model}<br />{run?.projection_set?.name ?? run?.projection_set_name ?? 'Projection Set unavailable'}<br />{run?.scenario?.name ?? run?.scenario_name ?? 'Scenario unavailable'}<br /><span><CalendarDays size={15} />{date ? new Date(date).toLocaleDateString() : '—'}</span></p>
       <div className="provenance-status"><span>Status</span><StatusBadge status={statusText(run?.status)} /></div>
-      <div className="results-callout"><GitCompareArrows size={20} /><span><b>{summary?.results_available ? 'Backend results available' : 'Waiting for run results'}</b><small>{summary?.output_row_count?.toLocaleString() ?? 0} result rows · {summary?.illustrative ? 'Illustrative data' : 'Run output'}</small></span></div>
+      <div className="results-callout"><GitCompareArrows size={20} /><span><b>{summary?.results_available ? 'Backend results available' : 'Waiting for run results'}</b><small>{summary?.output_row_count?.toLocaleString() ?? 0} result rows · {summary?.illustrative ? <IllustrativeBadge /> : 'Run output'}</small></span></div>
       <button className="result-action result-action-primary" onClick={onCompare}><GitBranch size={17} />Compare runs</button>
-      <button className="result-action" onClick={onExport} disabled={!run?.results_available}><Download size={17} />Export results</button>
+      <button className="result-action" title={summary?.illustrative ? 'Illustrative output is not certified for statutory filing.' : undefined} onClick={onExport} disabled={!run?.results_available}><Download size={17} />Export results{summary?.illustrative ? ' · Illustrative' : ''}</button>
       <button className="result-action" onClick={() => onNotify('Scratchpad is not available in this build')}><Plus size={17} />Add to Scratchpad</button>
     </section>
   )

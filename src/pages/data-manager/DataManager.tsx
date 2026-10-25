@@ -83,6 +83,7 @@ type Issue = {
   field?: string
   column_name?: string | null
   message?: string
+  value?: unknown
   severity?: string
 }
 
@@ -165,6 +166,8 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
   const [versionLabel, setVersionLabel] = useState('')
   const [valuationDate, setValuationDate] = useState('')
   const [expectedRecordCount, setExpectedRecordCount] = useState('')
+  const [schemaVersion, setSchemaVersion] = useState('v1')
+  const [productContext, setProductContext] = useState<'MYGA' | 'SPIA'>('MYGA')
   const [lookupKeys, setLookupKeys] = useState('')
   const [valueColumn, setValueColumn] = useState('')
   const [tableType, setTableType] = useState('generic')
@@ -180,6 +183,8 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
   const [comparisonBaseId, setComparisonBaseId] = useState('')
   const [compareDatasetId, setCompareDatasetId] = useState('')
   const [datasetRecord, setDatasetRecord] = useState<Dataset | null>(null)
+  const [recordOffset, setRecordOffset] = useState(0)
+  const [recordsOpen, setRecordsOpen] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [busyAction, setBusyAction] = useState('')
   const [error, setError] = useState('')
@@ -203,6 +208,11 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
       ? [{ id: session.dataset_id, kind: (session.dataset_kind as DatasetKind | null) ?? datasetKindFor(category) }]
       : []
   const selectedDataset = datasets.find(dataset => dataset.id === selectedDatasetId) ?? datasets[0]
+  const recordsQuery = useApiQuery<{ records?: { policy_id: string; data: Record<string, unknown> }[]; total?: number; limit?: number; offset?: number }>(
+    recordsOpen && selectedDataset?.kind === 'inforce'
+      ? `/v1/inputs/inforce/${encodeURIComponent(selectedDataset.id)}/records?limit=25&offset=${recordOffset}`
+      : null,
+  )
   const versionsQuery = useApiQuery<VersionResponse>(selectedDataset ? `/v1/datasets/${selectedDataset.kind}/${selectedDataset.id}/versions` : null)
   const comparisonBaseDatasetId = comparisonBaseId || selectedDataset?.id || ''
   const compareQuery = useApiQuery<{ changes?: { change: string; key: string[]; before?: Record<string, unknown>; after?: Record<string, unknown> }[]; added_count?: number; removed_count?: number; changed_count?: number }>(
@@ -227,8 +237,18 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
   const step = !session ? 1 : !sessionFileName && !file ? 2 : !previewQuery.data ? 3 : sessionStatus === 'committed' ? 5 : 4
   const blockingIssueCount = issues.filter(issue => issue.severity === 'error').length
   const currentDataset = (datasetRecord?.id === selectedDataset?.id ? datasetRecord : null) ?? versions.find(version => version.id === selectedDataset?.id) ?? null
-  const canDecide = reviewAllowed && ['validated', 'needs_review'].includes((currentDataset?.status ?? '').toLowerCase())
+  const isDatasetCommitter = Boolean(user?.id && currentDataset?.committed_by === user.id)
+  const canDecide = reviewAllowed && !isDatasetCommitter && ['validated', 'needs_review'].includes((currentDataset?.status ?? '').toLowerCase())
   const canStartSession = Boolean(projectId && datasetName.trim()) && (category !== 'scenario' || scenarioStructuralOnly || Boolean(scenarioModelVersionId.trim()))
+  const suggestedTarget = (source: string) => {
+    if (mapping[source] !== undefined) return mapping[source]
+    const normalized = source.trim().toLowerCase()
+    const aliases: Record<string, string> = {
+      guarantee_term_years: 'guarantee_period_years',
+      credited_rate: 'declared_rate',
+    }
+    return aliases[normalized] ?? previewQuery.data?.mapping?.[source] ?? ''
+  }
 
   const runAction = async (label: string, action: () => Promise<void>) => {
     setBusyAction(label)
@@ -251,6 +271,8 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
     if (category === 'liability_inforce') {
       if (valuationDate) options.valuation_date = valuationDate
       if (expectedRecordCount) options.expected_record_count = Number(expectedRecordCount)
+      options.schema_version = schemaVersion
+      options.product_context = productContext
     } else if (category === 'assumption_table' || category === 'factor_table') {
       if (lookupKeys.trim()) options.lookup_keys = lookupKeys.split(',').map(value => value.trim()).filter(Boolean)
       if (valueColumn.trim()) options.value_column = valueColumn.trim()
@@ -301,7 +323,7 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
     if (!sessionId) throw new Error('Start an import session first.')
     const fields = columns.reduce<MappingField[]>((next, column) => {
       const source = column.source ?? column.name
-      const value = mapping[source] ?? previewQuery.data?.mapping?.[source]
+      const value = suggestedTarget(source)
       if (value) next.push({ source_column: source, target_field: value })
       return next
     }, [])
@@ -320,7 +342,7 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
     if (!projectId || !mappingProfileName.trim()) throw new Error('Enter a name for the mapping profile.')
     const fields = columns.flatMap(column => {
       const source = column.source ?? column.name
-      const target = mapping[source] ?? previewQuery.data?.mapping?.[source]
+      const target = suggestedTarget(source)
       return target ? [{ source_column: source, target_field: target }] : []
     })
     if (!fields.length) throw new Error('Map at least one source column before saving a profile.')
@@ -377,7 +399,9 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
     try {
       result = await request<Dataset>(`/v1/datasets/${encodeURIComponent(sessionKind)}/${encodeURIComponent(datasetId)}/${decision}`, {
         method: 'POST',
-        body: decision === 'reject' ? JSON.stringify({ reason: rejectReason.trim() }) : JSON.stringify({}),
+        body: JSON.stringify({
+          reason: decision === 'reject' ? rejectReason.trim() : 'Independent reviewer approval.',
+        }),
       })
     } catch (caught) {
       if (caught instanceof ApiError && (caught.code === 'SELF_APPROVAL_FORBIDDEN' || caught.message.includes('SELF_APPROVAL_FORBIDDEN'))) {
@@ -418,6 +442,8 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
     setDatasetName(item.name ?? '')
     setVersionLabel(item.version_label ?? '')
     setValuationDate(String(item.options?.valuation_date ?? ''))
+    setSchemaVersion(String(item.options?.schema_version ?? item.options?.input_schema_version ?? 'v1'))
+    setProductContext(item.options?.product_context === 'SPIA' ? 'SPIA' : 'MYGA')
     setExpectedRecordCount(item.options?.expected_record_count === undefined ? '' : String(item.options.expected_record_count))
     setLookupKeys(Array.isArray(item.options?.lookup_keys) ? item.options.lookup_keys.join(', ') : '')
     setValueColumn(String(item.options?.value_column ?? ''))
@@ -438,6 +464,8 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
       setDatasetName(result.name ?? '')
       setVersionLabel(result.version_label ?? '')
       setValuationDate(String(result.options?.valuation_date ?? ''))
+      setSchemaVersion(String(result.options?.schema_version ?? result.options?.input_schema_version ?? 'v1'))
+      setProductContext(result.options?.product_context === 'SPIA' ? 'SPIA' : 'MYGA')
       setExpectedRecordCount(result.options?.expected_record_count === undefined ? '' : String(result.options.expected_record_count))
       setLookupKeys(Array.isArray(result.options?.lookup_keys) ? result.options.lookup_keys.join(', ') : '')
       setValueColumn(String(result.options?.value_column ?? ''))
@@ -494,8 +522,11 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
             <label>Dataset name<input value={datasetName} onChange={event => setDatasetName(event.target.value)} placeholder="Name this dataset" maxLength={255} /></label>
             <label>Version label<input value={versionLabel} onChange={event => setVersionLabel(event.target.value)} placeholder="Optional version label" maxLength={30} /></label>
             {kind === 'liability_inforce' && <>
+              <label>Product context<select value={productContext} onChange={event => setProductContext(event.target.value as 'MYGA' | 'SPIA')}><option value="MYGA">MYGA</option><option value="SPIA">SPIA</option></select></label>
+              <label>In-force schema version<select value={schemaVersion} onChange={event => setSchemaVersion(event.target.value)}><option value="v1">v1</option></select></label>
               <label>Valuation date<input type="date" value={valuationDate} onChange={event => setValuationDate(event.target.value)} /></label>
               <label>Expected record count<input type="number" min="0" step="1" value={expectedRecordCount} onChange={event => setExpectedRecordCount(event.target.value)} placeholder="Optional" /></label>
+              <p className="data-manager-permission-note">Product context is stored with the session; backend validation still uses each row’s mapped <code>product_type</code> and selected schema version. The default schema is v1; unsupported versions return INFORCE_SCHEMA_VERSION_NOT_SUPPORTED. Ensure your source includes product_type. MYGA projections also require approved mortality, surrender-charge and surrender-charge age-cap factor tables, plus an economic scenario.</p>
             </>}
             {(kind === 'assumption_table' || kind === 'factor_table') && <>
               <label>Lookup keys<input value={lookupKeys} onChange={event => setLookupKeys(event.target.value)} placeholder="Comma-separated, e.g. age, gender" /></label>
@@ -529,7 +560,7 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
               <div className="data-manager-mapping"><div className="data-manager-subheading"><h3>Column mapping</h3><span>Use the backend schema names for destination fields.</span></div>
                 {mappingProfilesQuery.error && <div className="data-manager-inline-error"><AlertCircle size={14} />Could not load mapping profiles: {mappingProfilesQuery.error.message}</div>}
                 <div className="data-manager-profile-row"><label>Reuse profile<select value={mappingProfileId} onChange={event => { const profileId = event.target.value; setMappingProfileId(profileId); const profile = mappingProfiles.find(item => item.id === profileId); if (profile) setMapping(Object.fromEntries(profile.fields.map(field => [field.source_column, field.target_field]))) }}><option value="">Map columns manually</option>{mappingProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label><label>Save current mapping as<input value={mappingProfileName} onChange={event => setMappingProfileName(event.target.value)} placeholder="Mapping profile name" /></label><button className="data-manager-secondary-button" disabled={!mappingProfileName.trim() || Boolean(busyAction)} onClick={() => void saveMappingProfile()}>{busyAction === 'Saving mapping profile' ? 'Saving…' : 'Save profile'}</button></div>
-                {columns.map(column => { const source = column.source ?? column.name; return <label key={source}><span>{source}{column.required && <em> required</em>}</span><input value={mapping[source] ?? previewQuery.data?.mapping?.[source] ?? ''} onChange={event => { setMappingProfileId(''); setMapping(current => ({ ...current, [source]: event.target.value })) }} placeholder="Destination field" disabled={Boolean(mappingProfileId)} /></label> })}</div>
+                {columns.map(column => { const source = column.source ?? column.name; return <label key={source}><span>{source}{column.required && <em> required</em>}</span><input value={mapping[source] ?? suggestedTarget(source)} onChange={event => { setMappingProfileId(''); setMapping(current => ({ ...current, [source]: event.target.value })) }} placeholder="Destination field" disabled={Boolean(mappingProfileId)} /></label> })}</div>
               <div className="data-manager-action-row"><span className="data-manager-file-note">Mapping is saved against this session and included in validation.</span>{uploadAllowed && <><button className="data-manager-secondary-button" disabled={Boolean(busyAction)} onClick={() => void saveMapping()}>{busyAction === 'Saving mapping' ? 'Saving…' : 'Save mapping'}</button><button className="data-manager-primary-button" disabled={Boolean(busyAction)} onClick={() => void validate()}><ClipboardCheck size={17} />{busyAction === 'Validating import' ? 'Validating…' : 'Run validation'}</button></>}</div>
             </>}
           </section>
@@ -540,12 +571,13 @@ export function DataManager({ initialCategory = 'liability_inforce' }: { initial
             {(issuesQuery.loading || rejectedQuery.loading) && <div className="data-manager-loading"><RefreshCw size={16} className="data-manager-spin" />Loading validation findings…</div>}
             {issuesQuery.error && <div className="data-manager-inline-error"><AlertCircle size={14} />Could not load validation issues: {issuesQuery.error.message}</div>}
             {rejectedQuery.error && <div className="data-manager-inline-error"><AlertCircle size={14} />Could not load rejected records: {rejectedQuery.error.message}</div>}
-            {issues.length > 0 && <div className="data-manager-findings"><h3>Issues</h3>{issues.slice(0, 8).map((issue, index) => <div key={String(issue.id ?? index)}><span>Row {issue.row_number ?? issue.row ?? '—'}</span><b>{issue.column_name ?? issue.field ?? 'Record'}</b><p>{issue.message ?? 'Validation issue returned by the API.'}</p></div>)}</div>}
+            {issues.length > 0 && <div className="data-manager-findings"><h3>Issues</h3>{issues.slice(0, 8).map((issue, index) => <div key={String(issue.id ?? index)}><span>{(issue.severity ?? 'issue').toUpperCase()} · Row {issue.row_number ?? issue.row ?? '—'}</span><b>{issue.column_name ?? issue.field ?? 'Record'}{issue.code ? ` · ${issue.code}` : ''}</b><p>{issue.message ?? 'Validation issue returned by the API.'}{issue.value !== undefined ? ` Value: ${JSON.stringify(issue.value)}` : ''}</p></div>)}</div>}
             {rejectedRecords.length > 0 && <div className="data-manager-findings is-rejected"><h3>Rejected records</h3>{rejectedRecords.slice(0, 5).map((record, index) => <div key={String(record.id ?? index)}><span>Row {record.row_number ?? '—'}</span><b>{record.reasons?.map(reason => reason.column_name ?? reason.field ?? reason.code).filter(Boolean).join(', ') || 'Record'}</b><p>{record.reasons?.map(reason => reason.message).filter(Boolean).join('; ') || 'Rejected by validation.'}<br />Source: {JSON.stringify(record.raw_record ?? {})}</p></div>)}</div>}
             <div className="data-manager-action-row"><span className="data-manager-file-note">Commit creates a dataset record and starts the approval gate. Warnings are allowed; errors are blocking.</span>{uploadAllowed && <button className="data-manager-primary-button" disabled={!['validated', 'needs_review'].includes(sessionStatus) || blockingIssueCount > 0 || Boolean(busyAction)} onClick={() => void commit()}><Database size={17} />{busyAction === 'Committing dataset' ? 'Committing…' : 'Commit dataset'}</button>}</div>
           </section>
 
           {datasetId && <section className="data-manager-card data-manager-review-card"><div className="data-manager-card-heading"><div><span className="data-manager-step-label">STEP 05</span><h2>Approval gate</h2><p>Reviewers make the final release decision for the committed dataset. The uploader cannot approve their own upload.</p></div><ShieldCheck size={22} className="data-manager-muted-icon" /></div>{datasets.length > 1 && <label className="data-manager-dataset-select">Scenario dataset<select value={selectedDataset?.id ?? ''} onChange={event => { setSelectedDatasetId(event.target.value); setComparisonBaseId(event.target.value); setCompareDatasetId(''); setDatasetRecord(null) }}>{datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.id}</option>)}</select></label>}<div className="data-manager-review-context"><span>Dataset</span><b>{datasetId}</b><span className={`data-manager-status status-${(currentDataset?.status ?? sessionStatus) || 'committed'}`}>{displayStatus(currentDataset?.status ?? session.status ?? 'committed')}</span></div>{!reviewAllowed && <p className="data-manager-permission-note"><LockKeyhole size={14} />Approval actions require admin, actuary, or reviewer access.</p>}{reviewAllowed && canDecide && <><label className="data-manager-reject-field">Rejection reason<input value={rejectReason} onChange={event => setRejectReason(event.target.value)} placeholder="Required only when rejecting" disabled={Boolean(busyAction)} /></label><div className="data-manager-action-row"><span className="data-manager-file-note">Kind: {sessionKind} · governed dataset ID: {datasetId}</span><button className="data-manager-danger-button" disabled={Boolean(busyAction) || !rejectReason.trim()} onClick={() => void decide('reject')}><XCircle size={17} />{busyAction === 'Rejecting dataset' ? 'Rejecting…' : 'Reject'}</button><button className="data-manager-primary-button" disabled={Boolean(busyAction)} onClick={() => void decide('approve')}><CheckCircle2 size={17} />{busyAction === 'Approving dataset' ? 'Approving…' : 'Approve dataset'}</button></div></>}{reviewAllowed && !canDecide && <p className="data-manager-permission-note">{currentDataset?.status ? `This dataset is ${displayStatus(currentDataset.status)} and is not awaiting review.` : 'Loading the committed dataset lifecycle status…'}</p>}</section>}
+          {datasetId && <section className="data-manager-card data-manager-review-card"><div className="data-manager-card-heading"><div><span className="data-manager-step-label">STEP 05</span><h2>Approval gate</h2><p>Reviewers make the final release decision for the committed dataset. The uploader cannot approve their own upload.</p></div><ShieldCheck size={22} className="data-manager-muted-icon" /></div>{datasets.length > 1 && <label className="data-manager-dataset-select">Scenario dataset<select value={selectedDataset?.id ?? ''} onChange={event => { setSelectedDatasetId(event.target.value); setComparisonBaseId(event.target.value); setCompareDatasetId(''); setDatasetRecord(null); setRecordsOpen(false); setRecordOffset(0) }}>{datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.id}</option>)}</select></label>}<div className="data-manager-review-context"><span>Dataset</span><b>{datasetId}</b><span className={`data-manager-status status-${(currentDataset?.status ?? sessionStatus) || 'committed'}`}>{displayStatus(currentDataset?.status ?? session.status ?? 'committed')}</span></div>{!reviewAllowed && <p className="data-manager-permission-note"><LockKeyhole size={14} />Approval actions require admin, actuary, or reviewer access.</p>}{reviewAllowed && canDecide && <><label className="data-manager-reject-field">Rejection reason<input value={rejectReason} onChange={event => setRejectReason(event.target.value)} placeholder="Required only when rejecting" disabled={Boolean(busyAction)} /></label><div className="data-manager-action-row"><span className="data-manager-file-note">Kind: {sessionKind} · governed dataset ID: {datasetId}</span><button className="data-manager-danger-button" disabled={Boolean(busyAction) || rejectReason.trim().length < 3} onClick={() => void decide('reject')}><XCircle size={17} />{busyAction === 'Rejecting dataset' ? 'Rejecting…' : 'Reject'}</button><button className="data-manager-primary-button" disabled={Boolean(busyAction)} onClick={() => void decide('approve')}><CheckCircle2 size={17} />{busyAction === 'Approving dataset' ? 'Approving…' : 'Approve dataset'}</button></div></>}{reviewAllowed && !canDecide && <p className="data-manager-permission-note">{isDatasetCommitter ? 'You committed this dataset and cannot approve or reject it. Assign an independent reviewer.' : currentDataset?.status ? `This dataset is ${displayStatus(currentDataset.status)} and is not awaiting review.` : 'Loading the committed dataset lifecycle status…'}</p>}{selectedDataset?.kind === 'inforce' && <div className="data-manager-record-viewer"><button className="data-manager-secondary-button" onClick={() => { setRecordsOpen(open => !open); setRecordOffset(0) }}>{recordsOpen ? 'Hide in-force records' : 'View in-force records'}</button>{recordsOpen && <>{recordsQuery.loading && <div className="data-manager-loading"><RefreshCw size={15} className="data-manager-spin" />Loading records…</div>}{recordsQuery.error && <div className="data-manager-inline-error"><AlertCircle size={14} />Could not load in-force records: {recordsQuery.error.message}</div>}{recordsQuery.data && <><div className="data-manager-preview-meta"><span><b>{recordsQuery.data.total ?? 0}</b> records</span><span>Showing {recordOffset + 1}–{Math.min(recordOffset + 25, recordsQuery.data.total ?? 0)}</span></div><div className="data-manager-table-wrap"><table className="data-manager-table"><thead><tr><th>Policy ID</th>{Object.keys(recordsQuery.data.records?.[0]?.data ?? {}).map(field => <th key={field}>{field}</th>)}</tr></thead><tbody>{(recordsQuery.data.records ?? []).map((record, index) => <tr key={`${record.policy_id}-${index}`}><td>{record.policy_id}</td>{Object.keys(recordsQuery.data?.records?.[0]?.data ?? {}).map(field => <td key={field}>{String(record.data[field] ?? '—')}</td>)}</tr>)}</tbody></table></div><div className="data-manager-action-row"><button className="data-manager-secondary-button" disabled={recordOffset === 0} onClick={() => setRecordOffset(offset => Math.max(0, offset - 25))}>Previous</button><button className="data-manager-secondary-button" disabled={recordOffset + 25 >= (recordsQuery.data.total ?? 0)} onClick={() => setRecordOffset(offset => offset + 25)}>Next</button></div></>}</>}</div>}</section>}
           {datasetId && <section className="data-manager-card data-manager-history-card">
             <div className="data-manager-card-heading"><div><span className="data-manager-step-label">DATASET LIFECYCLE</span><h2>Versions and comparison</h2><p>Review every immutable version and compare rows between versions.</p></div><History size={22} className="data-manager-muted-icon" /></div>
             {versionsQuery.loading && <div className="data-manager-loading"><RefreshCw size={15} className="data-manager-spin" />Loading dataset versions…</div>}

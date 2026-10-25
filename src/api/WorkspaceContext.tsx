@@ -11,22 +11,43 @@ type WorkspaceValue = {
   projects: WorkspaceProject[]
   project: WorkspaceProject | null
   projectId: string | null
+  activeProduct: string
+  setActiveProduct: (product: string) => void
+  systemStatus: SystemStatus | null
+  systemStatusError: Error | null
+  systemStatusLoading: boolean
   loading: boolean
   error: Error | null
   selectProject: (id: string) => void
   createProject: (name: string, description: string) => Promise<WorkspaceProject>
   refetchProjects: () => void
 }
+export type SystemStatus = {
+  status: string
+  app: string
+  version: string
+  app_env: string
+  database: { status: string; latency_ms: number | null }
+  engine: { registered_functions: number; products: string[]; execution_backend: string; engine_version: string }
+  time: string
+}
 const ACTIVE_PROJECT_KEY = 'mentor-amp-active-project'
+const ACTIVE_PRODUCT_KEY = 'mentor-amp-active-product'
 const WorkspaceContext = createContext<WorkspaceValue | null>(null)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { request, user } = useApi()
   const canCreateProject = canEditProjectSettings(user?.roles ?? [])
   const { data, error, loading, refetch } = useApiQuery<ProjectsResponse>('/v1/projects/')
+  const systemQuery = useApiQuery<SystemStatus>('/v1/system/status')
   const projects = data?.projects ?? []
   const [selectedId, setSelectedId] = useState<string | null>(() => window.sessionStorage.getItem(ACTIVE_PROJECT_KEY))
+  const [activeProduct, setActiveProductState] = useState(() => window.sessionStorage.getItem(ACTIVE_PRODUCT_KEY) ?? 'All')
   const project = projects.find(item => item.id === selectedId) ?? projects[0] ?? null
+  const setActiveProduct = useCallback((product: string) => {
+    window.sessionStorage.setItem(ACTIVE_PRODUCT_KEY, product)
+    setActiveProductState(product)
+  }, [])
   const selectProject = useCallback((id: string) => {
     window.sessionStorage.setItem(ACTIVE_PROJECT_KEY, id)
     setSelectedId(id)
@@ -38,7 +59,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     refetch()
     return created
   }, [canCreateProject, request, selectProject, refetch])
-  const value = useMemo(() => ({ projects, project, projectId: project?.id ?? null, loading, error, selectProject, createProject, refetchProjects: refetch }), [projects, project, loading, error, selectProject, createProject, refetch])
+  const value = useMemo(() => ({
+    projects,
+    project,
+    projectId: project?.id ?? null,
+    activeProduct,
+    setActiveProduct,
+    systemStatus: systemQuery.data,
+    systemStatusError: systemQuery.error,
+    systemStatusLoading: systemQuery.loading,
+    loading,
+    error,
+    selectProject,
+    createProject,
+    refetchProjects: refetch,
+  }), [projects, project, activeProduct, setActiveProduct, systemQuery.data, systemQuery.error, systemQuery.loading, loading, error, selectProject, createProject, refetch])
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }
 

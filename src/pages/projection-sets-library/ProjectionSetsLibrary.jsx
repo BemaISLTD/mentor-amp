@@ -27,7 +27,7 @@ import './projection-sets.css'
 const EMPTY_PROJECTION_SETS = []
 
 export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateOpened, onSetupStarted, onSetupFinished, onNavigateToInput, onNavigateToScenario }) {
-  const { projectId } = useWorkspace()
+  const { projectId, activeProduct } = useWorkspace()
   const { user } = useApi()
   const canCreateProjectionSet = canImportData(user?.roles ?? [])
   const canCreateRunSet = canSubmitRuns(user?.roles ?? [])
@@ -82,10 +82,11 @@ export function ProjectionSetsLibrary({ onNotify, startCreate = false, onCreateO
 
     return sets.filter((set) => {
       const matchesStatus = statusFilter === 'All statuses' || set.status === statusFilter
+      const matchesProduct = activeProduct === 'All' || set.product === activeProduct
       const searchable = `${set.name} ${set.scenario} ${set.description} ${set.product}`.toLowerCase()
-      return matchesStatus && searchable.includes(normalizedQuery)
+      return matchesStatus && matchesProduct && searchable.includes(normalizedQuery)
     })
-  }, [query, sets, statusFilter])
+  }, [activeProduct, query, sets, statusFilter])
 
   const readyCount = sets.filter(set => set.status === 'Ready').length
   const reviewCount = sets.filter(set => set.status === 'Needs review').length

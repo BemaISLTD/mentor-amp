@@ -7,8 +7,8 @@ import { canImportData } from '../../api/permissions'
 
 type ModelVersion = { id: string; version_label: string; status: string; basis?: string }
 type ModelRow = { id: string; name: string; product_code?: string; current_version?: ModelVersion | null; status: string }
-type InputRow = { id: string; name: string; category?: string; category_label?: string; status: string; version_label?: string; record_count?: number; mapped_column_count?: number }
-type ScenarioRow = { id: string; name: string; status: string }
+type InputRow = { id: string; name: string; product_code?: string; category?: string; category_label?: string; status: string; version_label?: string; record_count?: number; mapped_column_count?: number }
+type ScenarioRow = { id: string; name: string; product_code?: string; status: string }
 type SelectOption = { variable_name: string; display_name: string; unit?: string }
 type ValidationCheck = { status: string; label: string; message?: string }
 type PublishedOutputsState = { versionId: string; outputs: SelectOption[]; loading: boolean; error: Error | null }
@@ -33,19 +33,21 @@ const monthDistance = (start: string, end: string) => {
 }
 
 export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInput, onNavigateToScenario }: { onClose: () => void; onCreated: (message: string) => void; onNavigateToInput?: (page: string) => void; onNavigateToScenario?: () => void }) {
-  const { projectId } = useWorkspace()
+  const { projectId, activeProduct } = useWorkspace()
   const { request, user } = useApi()
   const roleCanCreate = canImportData(user?.roles ?? [])
   const modelQuery = useApiQuery<{ models: ModelRow[] }>(projectId ? `/v1/projects/${projectId}/models` : null)
   const inputQuery = useApiQuery<{ inputs: InputRow[] }>(projectId ? `/v1/projects/${projectId}/inputs` : null)
   const scenarioQuery = useApiQuery<{ scenario_sets: { scenarios: ScenarioRow[] }[] }>(projectId ? `/v1/projects/${projectId}/scenario-sets` : null)
   const models = modelQuery.data?.models ?? emptyModels
+  const productModels = activeProduct === 'All' ? models : models.filter(item => item.product_code === activeProduct)
   const inputs = inputQuery.data?.inputs ?? emptyInputs
   const scenarios = useMemo(() => (scenarioQuery.data?.scenario_sets ?? emptyScenarioSets).flatMap(group => group.scenarios), [scenarioQuery.data])
   const [modelVersionId, setModelVersionId] = useState('')
   const [inforceId, setInforceId] = useState('')
   const [assumptionId, setAssumptionId] = useState('')
-  const [factorId, setFactorId] = useState('')
+  const [factorIds, setFactorIds] = useState<string[]>([])
+  const [factorSelectionInitialized, setFactorSelectionInitialized] = useState(false)
   const [scenarioId, setScenarioId] = useState('')
   const [name, setName] = useState('')
   const [startMonth, setStartMonth] = useState(initialMonth)
@@ -53,6 +55,7 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
   const [selectedOutputs, setSelectedOutputs] = useState<string[]>([])
   const [traceMode, setTraceMode] = useState<'none' | 'selected_policies' | 'all'>('selected_policies')
   const [tracePolicyIds, setTracePolicyIds] = useState('')
+  const [decrementMethodology, setDecrementMethodology] = useState<'best_estimate' | 'zero_decrements'>('best_estimate')
   const [formulaConfirmed, setFormulaConfirmed] = useState(false)
   const [inforceConfirmed, setInforceConfirmed] = useState(false)
   const [assumptionConfirmed, setAssumptionConfirmed] = useState(false)
@@ -62,7 +65,7 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
   const [error, setError] = useState('')
   const [publishedOutputs, setPublishedOutputs] = useState<PublishedOutputsState>({ versionId: '', outputs: [], loading: false, error: null })
 
-  const selectedModel = models.find(item => item.current_version?.id === modelVersionId)
+  const selectedModel = productModels.find(item => item.current_version?.id === modelVersionId)
   const selectedVersion = selectedModel?.current_version
   const outputVersionId = selectedVersion?.id ?? ''
   const outputs = publishedOutputs.versionId === outputVersionId ? publishedOutputs.outputs : emptyOutputs
@@ -73,15 +76,15 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
   const factorTables = inputs.filter(item => categoryOf(item) === 'factor_table')
   const selectedInforce = inforceFiles.find(item => item.id === inforceId)
   const selectedAssumption = assumptionTables.find(item => item.id === assumptionId)
-  const selectedFactor = factorTables.find(item => item.id === factorId)
+  const selectedFactors = factorTables.filter(item => factorIds.includes(item.id))
   const selectedScenario = scenarios.find(item => item.id === scenarioId)
   const horizonMonths = startMonth && endMonth && startMonth <= endMonth ? monthDistance(startMonth, endMonth) : 0
   const modelValidated = statusIsValidated(selectedVersion?.status)
   const inforceValidated = statusIsValidated(selectedInforce?.status)
-  const tablesValidated = (!assumptionId || statusIsValidated(selectedAssumption?.status)) && (!factorId || statusIsValidated(selectedFactor?.status)) && Boolean(assumptionId || factorId)
+  const tablesValidated = (!assumptionId || statusIsValidated(selectedAssumption?.status)) && selectedFactors.every(item => statusIsValidated(item.status)) && Boolean(assumptionId || factorIds.length)
   const scenarioValidated = statusIsValidated(selectedScenario?.status)
   const horizonValid = horizonMonths > 0 && horizonMonths <= 1200
-  const confirmationsComplete = formulaConfirmed && inforceConfirmed && scenarioConfirmed && (!assumptionId || assumptionConfirmed) && (!factorId || factorConfirmed)
+  const confirmationsComplete = formulaConfirmed && inforceConfirmed && scenarioConfirmed && (!assumptionId || assumptionConfirmed) && (!factorIds.length || factorConfirmed)
 
   useEffect(() => {
     if (!outputVersionId) {
@@ -98,8 +101,12 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
   }, [outputVersionId, request])
 
   useEffect(() => {
-    if (!modelVersionId && models[0]?.current_version?.id) setModelVersionId(models[0].current_version.id)
-  }, [models, modelVersionId])
+    if (!productModels.some(item => item.current_version?.id === modelVersionId)) {
+      setModelVersionId(productModels[0]?.current_version?.id ?? '')
+      setSelectedOutputs([])
+      setFormulaConfirmed(false)
+    }
+  }, [productModels, modelVersionId])
   useEffect(() => {
     if (!inforceId && inforceFiles[0]?.id) setInforceId(inforceFiles[0].id)
   }, [inforceFiles, inforceId])
@@ -107,14 +114,26 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
     if (!assumptionId && assumptionTables[0]?.id) setAssumptionId(assumptionTables[0].id)
   }, [assumptionTables, assumptionId])
   useEffect(() => {
-    if (!factorId && factorTables[0]?.id) setFactorId(factorTables[0].id)
-  }, [factorTables, factorId])
+    if (factorSelectionInitialized || !factorTables.length) return
+    setFactorIds(factorTables[0]?.id ? [factorTables[0].id] : [])
+    setFactorSelectionInitialized(true)
+  }, [factorTables, factorSelectionInitialized])
   useEffect(() => {
     if (!scenarioId && scenarios[0]?.id) setScenarioId(scenarios[0].id)
   }, [scenarios, scenarioId])
   useEffect(() => {
-    if (outputs.length && !selectedOutputs.length) setSelectedOutputs(outputs.map(item => item.variable_name))
-  }, [outputs, selectedOutputs.length])
+    if (outputs.length && !selectedOutputs.length) {
+      const mygaOutputs = [
+        'account_value_close', 'mgsv_close', 'surrender_benefit', 'death_benefit',
+        'death_claims', 'surrender_claims', 'annuitization_transfer', 'maturity_benefit',
+        'maintenance_expense', 'liability_outgo', 'net_cash_flow', 'reserve',
+      ]
+      const preferred = selectedModel?.product_code === 'MYGA' || activeProduct === 'MYGA'
+        ? outputs.filter(item => mygaOutputs.includes(item.variable_name)).map(item => item.variable_name)
+        : outputs.map(item => item.variable_name)
+      setSelectedOutputs(preferred)
+    }
+  }, [outputs, selectedOutputs.length, selectedModel?.product_code, activeProduct])
 
   const create = async () => {
     if (!roleCanCreate || !canCreate || busy || !projectId || !selectedVersion) return
@@ -128,14 +147,14 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
         model_version_id: selectedVersion.id,
         inforce_file_ids: [inforceId],
         assumption_table_ids: assumptionId ? [assumptionId] : [],
-        factor_table_ids: factorId ? [factorId] : [],
+        factor_table_ids: factorIds,
         scenario_ids: [scenarioId],
         valuation_date: `${startMonth}-01`,
         horizon_months: horizonMonths,
         time_step: 'monthly',
         output_variables: selectedOutputs,
         trace_scope: { mode: traceMode, policy_ids: traceMode === 'selected_policies' ? tracePolicyIds.split(',').map(value => value.trim()).filter(Boolean).slice(0, 25) : [] },
-        parameters: {},
+        parameters: { decrement_methodology: decrementMethodology },
       }
       const created = await request<{ id: string; name: string }>(`/v1/projects/${projectId}/projection-sets`, { method: 'POST', body: JSON.stringify(body) })
       const result = await request<{ status?: string; checks?: ValidationCheck[] }>(`/v1/projection-sets/${created.id}/validate`, { method: 'POST' })
@@ -169,19 +188,20 @@ export function ProjectionSetCreateDialog({ onClose, onCreated, onNavigateToInpu
           <h3>Required before creation</h3>
           <SetupCheck done={modelValidated && formulaConfirmed} title="Validated, runnable model version" detail={`${selectedModel?.name ?? 'Select a model'} · ${selectedVersion?.version_label ?? 'No current version'} · Backend status: ${selectedVersion?.status ?? 'not available'}. Confirm formulas and required variables have been reviewed.`} />
           <SetupCheck done={inforceValidated && inforceConfirmed} title="Validated, fingerprinted inforce file" detail={`${selectedInforce?.name ?? 'Select an inforce file'} · Backend status: ${selectedInforce?.status ?? 'not available'}. Confirm required input columns have been mapped.`} />
-          <SetupCheck done={tablesValidated && (!assumptionId || assumptionConfirmed) && (!factorId || factorConfirmed)} title="Required tables pinned by ID" detail={`${selectedAssumption?.name ?? 'No assumption table selected'}${selectedFactor ? ` · ${selectedFactor.name}` : ''}. Confirm selected table IDs and backend statuses.`} />
+          <SetupCheck done={tablesValidated && (!assumptionId || assumptionConfirmed) && (!factorIds.length || factorConfirmed)} title="Required tables pinned by ID" detail={`${selectedAssumption?.name ?? 'No assumption table selected'}${selectedFactors.length ? ` · ${selectedFactors.map(item => item.name).join(', ')}` : ''}. Confirm selected table IDs and backend statuses.`} />
           <SetupCheck done={scenarioValidated && scenarioConfirmed} title="Compatible, validated scenario" detail={`${selectedScenario?.name ?? 'Select a scenario'} · Backend status: ${selectedScenario?.status ?? 'not available'}. Compatibility is confirmed by backend validation.`} />
           <SetupCheck done={selectedOutputs.length > 0} title="Published model output" detail={selectedOutputs.length ? `${selectedOutputs.length} published output${selectedOutputs.length === 1 ? '' : 's'} selected.` : 'Choose at least one output published by this model version.'} />
           <SetupCheck done={horizonValid} title="Supported monthly horizon" detail={horizonValid ? `${startMonth} through ${endMonth} · ${horizonMonths} monthly periods.` : 'Choose a start and end month within the supported 1–1,200 month range.'} />
         </div>
         <div className="projection-setup-fields">
-          <label>Trace capture<select value={traceMode} onChange={event => setTraceMode(event.target.value as 'none' | 'selected_policies' | 'all')}><option value="none">Do not capture trace</option><option value="selected_policies">Selected policies</option><option value="all">All policies (up to 25)</option></select>{traceMode === 'selected_policies' && <input value={tracePolicyIds} onChange={event => setTracePolicyIds(event.target.value)} placeholder="Policy IDs, comma separated" />}</label>
+          <label>Trace capture<select value={traceMode} onChange={event => setTraceMode(event.target.value as 'none' | 'selected_policies' | 'all')}><option value="none">Do not capture trace</option><option value="selected_policies">Selected policies</option><option value="all">All policies</option></select>{traceMode === 'selected_policies' && <input value={tracePolicyIds} onChange={event => setTracePolicyIds(event.target.value)} placeholder="Policy IDs, comma separated" />}</label>
+          <label>Decrement methodology<select value={decrementMethodology} onChange={event => setDecrementMethodology(event.target.value as 'best_estimate' | 'zero_decrements')}><option value="best_estimate">Best estimate (default)</option><option value="zero_decrements">Zero decrements (pure account rollforward)</option></select></label>
           <label className="projection-setup-full">Projection Set name<input autoFocus maxLength={255} onChange={event => setName(event.target.value)} placeholder="e.g. MYGA GAAP Reserve" value={name} /></label>
-          <label>Model<select value={modelVersionId} onChange={event => { setModelVersionId(event.target.value); setSelectedOutputs([]); setFormulaConfirmed(false); setScenarioConfirmed(false) }}><option value="">Select model</option>{models.map(item => item.current_version && <option key={item.current_version.id} value={item.current_version.id}>{item.name} · {item.current_version.version_label} · {item.current_version.status}</option>)}</select></label>
+          <label>Model<select value={modelVersionId} onChange={event => { setModelVersionId(event.target.value); setSelectedOutputs([]); setFormulaConfirmed(false); setScenarioConfirmed(false) }}><option value="">Select model</option>{productModels.map(item => item.current_version && <option key={item.current_version.id} value={item.current_version.id}>{item.name} · {item.current_version.version_label} · {item.current_version.status}</option>)}</select>{activeProduct !== 'All' && <small>Filtered to {activeProduct} models.</small>}</label>
           <label>Inforce file<select value={inforceId} onChange={event => { setInforceId(event.target.value); setInforceConfirmed(false) }}><option value="">Select from Inforce library</option>{inforceFiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status} · {item.record_count ?? 0} records</option>)}</select><button className="projection-browse-link" type="button" onClick={() => { if (onNavigateToInput) onNavigateToInput('Import Inforce'); else setError('Input-library navigation is not available from this dialog.') }}>Import or choose inforce file <ArrowRight size={14} /></button></label>
           <label>Validated scenario<select value={scenarioId} onChange={event => { setScenarioId(event.target.value); setScenarioConfirmed(false) }}><option value="">Select a validated scenario</option>{scenarios.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status}</option>)}</select><button className="projection-browse-link" type="button" onClick={() => { onClose(); if (onNavigateToScenario) onNavigateToScenario(); else setError('Scenario-library navigation is not available from this dialog.') }}>Browse scenario library <ArrowRight size={14} /></button></label>
           <label>Assumption table ID<select value={assumptionId} onChange={event => { setAssumptionId(event.target.value); setAssumptionConfirmed(false) }}><option value="">None</option>{assumptionTables.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status}{item.version_label ? ` · ${item.version_label}` : ''}</option>)}</select><button className="projection-browse-link" type="button" onClick={() => { if (onNavigateToInput) onNavigateToInput('Assumption Tables'); else setError('Input-library navigation is not available from this dialog.') }}>Browse assumption tables <ArrowRight size={14} /></button></label>
-          <label>Factor table ID<select value={factorId} onChange={event => { setFactorId(event.target.value); setFactorConfirmed(false) }}><option value="">None</option>{factorTables.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status}{item.version_label ? ` · ${item.version_label}` : ''}</option>)}</select><button className="projection-browse-link" type="button" onClick={() => { if (onNavigateToInput) onNavigateToInput('Factor Tables'); else setError('Input-library navigation is not available from this dialog.') }}>Browse factor tables <ArrowRight size={14} /></button></label>
+          <fieldset className="projection-setup-full"><legend>Factor tables {activeProduct === 'MYGA' ? '· MYGA may require surrender-charge and age-cap tables' : ''}</legend>{factorTables.length ? factorTables.map(item => <label key={item.id}><input type="checkbox" checked={factorIds.includes(item.id)} onChange={() => { setFactorIds(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id]); setFactorConfirmed(false) }} />{item.name} · {item.status}{item.version_label ? ` · ${item.version_label}` : ''}</label>) : <p>No factor tables are available.</p>}<button className="projection-browse-link" type="button" onClick={() => { if (onNavigateToInput) onNavigateToInput('Factor Tables'); else setError('Input-library navigation is not available from this dialog.') }}>Browse factor tables <ArrowRight size={14} /></button></fieldset>
           <label>Start month<input onChange={event => setStartMonth(event.target.value)} type="month" value={startMonth} /></label>
           <label>End month<input onChange={event => setEndMonth(event.target.value)} type="month" value={endMonth} /></label>
           <fieldset className="projection-setup-full"><legend>Published outputs {outputLoading ? '· loading…' : ''}</legend>{outputs.length ? outputs.map(item => <label key={item.variable_name}><input type="checkbox" checked={selectedOutputs.includes(item.variable_name)} onChange={() => toggleOutput(item.variable_name)} />{item.display_name} · {item.variable_name}{item.unit ? ` (${item.unit})` : ''}</label>) : <p>{outputLoading ? 'Loading published outputs…' : 'No published outputs are available for this model version.'}</p>}</fieldset>

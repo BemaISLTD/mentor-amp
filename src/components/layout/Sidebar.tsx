@@ -3,9 +3,12 @@ import { navItems } from '../../data/fixtures'
 import { useApp } from '../../context/useApp'
 import type { ScreenName } from '../../types'
 import { Logo } from './Logo'
+import { useWorkspace } from '../../api/WorkspaceContext'
 
 export function Sidebar({ onNavigate }: { onNavigate?: (screen: string) => void }) {
   const { activeScreen, setActiveScreen, notify } = useApp()
+  const { systemStatus, systemStatusError, systemStatusLoading } = useWorkspace()
+  const isHealthy = systemStatus?.status === 'ok' && systemStatus.database.status === 'ok'
   return <aside className="sidebar max-[760px]:sticky max-[760px]:top-0 max-[760px]:h-auto max-[760px]:min-h-0 max-[760px]:w-full max-[760px]:overflow-hidden">
     <Logo />
     <button className="mobile-menu" aria-label="Open navigation"><Menu size={20} /></button>
@@ -36,16 +39,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: (screen: string) => void 
       })}
     </nav>
     <div className="sidebar-footer max-[760px]:hidden">
-      <button onClick={() => notify('All systems are operational')} className="status-card">
+      <button onClick={() => notify(systemStatusError?.message ?? (systemStatusLoading ? 'Checking backend system status…' : systemStatus ? `${systemStatus.status} · database ${systemStatus.database.status} · ${systemStatus.engine.products.join(', ')}` : 'System status is unavailable.'))} className="status-card">
         <span className="status-card-head">
-          <span className="status-check"><Check size={13} /></span>
+          <span className="status-check">{isHealthy ? <Check size={13} /> : <i />}</span>
           <span>System status</span>
           <ArrowRight size={16} />
         </span>
-        <span>All systems operational</span>
-        <small>Updated just now</small>
+        <span>{systemStatusLoading ? 'Checking backend…' : systemStatusError ? 'Backend unavailable' : isHealthy ? 'Backend operational' : systemStatus?.status ?? 'Status unavailable'}</span>
+        <small>{systemStatus ? `Engine ${systemStatus.engine.engine_version}` : 'Live backend status'}</small>
       </button>
-      <div className="sidebar-meta"><span>Mentor AMP</span><span>Volt 1.0</span></div>
+      <div className="sidebar-meta"><span>Mentor AMP</span><span>{systemStatus?.engine.engine_version ?? 'Engine unavailable'}</span></div>
     </div>
   </aside>
 }

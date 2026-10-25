@@ -13,6 +13,7 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { StatusBadge } from '../../components/ui/StatusBadge'
+import { IllustrativeBadge } from '../../components/ui/IllustrativeBadge'
 import { useApi } from '../../api/ApiProvider'
 import { canImportData } from '../../api/permissions'
 import { useApiQuery } from '../../api/useApiQuery'
@@ -28,7 +29,7 @@ const ownerColors = {
 }
 
 export function ModelLibrary({ query, onNotify, onOpenModel }) {
-  const { projectId } = useWorkspace()
+  const { projectId, activeProduct, setActiveProduct, systemStatus } = useWorkspace()
   const { request, user } = useApi()
   const canCreateModel = canImportData(user?.roles ?? [])
   const catalogQuery = useApiQuery(projectId ? `/v1/projects/${projectId}/models` : null)
@@ -47,11 +48,13 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
       isOwned: Boolean(item.owner?.is_current_user || (user && item.owner?.id === user.id)),
     }
   })
-  const products = catalogQuery.data?.products ?? []
+  const products = catalogQuery.data?.products?.length
+    ? catalogQuery.data.products
+    : (systemStatus?.engine.products ?? []).map(code => ({ code }))
   const counts = catalogQuery.data?.counts ?? { all: apiModels.length, owned: 0, shared: 0 }
   const tabItems = [{ label: 'All', count: counts.all }, { label: 'Owned', count: counts.owned }, { label: 'Shared', count: counts.shared }]
+  const product = activeProduct === 'All' ? 'All products' : activeProduct
   const [activeTab, setActiveTab] = useState('All')
-  const [product, setProduct] = useState('All products')
   const [statusFilter, setStatusFilter] = useState('All statuses')
   const [sortNewestFirst, setSortNewestFirst] = useState(true)
   const [view, setView] = useState('list')
@@ -138,7 +141,7 @@ export function ModelLibrary({ query, onNotify, onOpenModel }) {
             <select
               id="model-product"
               value={product}
-              onChange={(event) => setProduct(event.target.value)}
+              onChange={(event) => setActiveProduct(event.target.value === 'All products' ? 'All' : event.target.value)}
             >
               <option>All products</option>
               {products.map((item) => (
@@ -296,6 +299,7 @@ function ModelRow({ model, favorite, onFavorite, onMore, onOpen, view }) {
       <div className="model-record-name min-w-0">
         <span className="flex min-w-0 items-center gap-2">
           <b>{model.name}</b>
+          {model.product === 'MYGA' && <IllustrativeBadge />}
           <button
             aria-label={favorite ? `Remove ${model.name} from favorites` : `Add ${model.name} to favorites`}
             aria-pressed={favorite}

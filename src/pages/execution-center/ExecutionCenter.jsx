@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '../../context/useApp'
 import { ApiError, useApi } from '../../api/ApiProvider'
+import { IllustrativeBadge } from '../../components/ui/IllustrativeBadge'
 import './execution-center.css'
 
 const executionSteps = [
@@ -36,10 +37,7 @@ const initialLogs = [
   '09:01:08 · Actuarial reporting in progress',
 ]
 
-const normalizeRunStatus = (value) => {
-  const normalized = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
-  return normalized === 'completed' ? 'success' : normalized
-}
+const normalizeRunStatus = (value) => String(value ?? '').toLowerCase()
 const labelForRunStatus = (value) => ({
   pending: 'Pending',
   running: 'Running',
@@ -87,6 +85,7 @@ function RunEvidencePanel({ evidence, onClose }) {
             <span><b>Run package fingerprint</b>{evidence.run.run_package_fingerprint ?? 'Unavailable'}</span>
             <span><b>Final manifest fingerprint</b>{evidence.run.final_manifest_fingerprint ?? 'Not available yet'}</span>
             {evidence.run.retried_from_run_id && <span><b>Retried from</b>{evidence.run.retried_from_run_id}</span>}
+            {evidence.run.illustrative && <span><b>Product status</b><IllustrativeBadge /></span>}
           </div>
         </div>
       )}
@@ -99,6 +98,8 @@ function RunEvidencePanel({ evidence, onClose }) {
             <span><b>Projection Set</b>{configuration?.projection_set?.name ?? configuration?.projection_set?.id ?? 'Unavailable'}</span>
             <span><b>Model / version</b>{[configuration?.model?.name, configuration?.model_version?.version_label].filter(Boolean).join(' · ') || 'Unavailable'}</span>
             <span><b>Valuation date</b>{configuration?.valuation_date ?? 'Unavailable'}</span>
+            <span><b>Decrement methodology</b>{configuration?.parameters?.decrement_methodology ?? configuration?.decrement_methodology ?? 'Unavailable'}</span>
+            <span><b>Model fingerprint</b>{configuration?.model?.fingerprint ?? configuration?.model_version?.fingerprint ?? 'Unavailable'}</span>
             <span><b>Scenario</b>{configuration?.scenario?.name ?? 'Unavailable'}</span>
             <span><b>Inputs</b>{datasets.length ? datasets.map(dataset => dataset.name ?? dataset.id).join(', ') : 'None listed'}</span>
             <span><b>Formulas / variables</b>{`${configuration?.formulas?.length ?? 0} / ${configuration?.variables?.length ?? 0}`}</span>
@@ -133,6 +134,7 @@ function RunEvidencePanel({ evidence, onClose }) {
               <span>{attempt.started_at} – {attempt.completed_at ?? 'in progress'}</span>
               {attempt.error_message && <p role="alert">{attempt.error_type ? `${attempt.error_type}: ` : ''}{attempt.error_message}</p>}
               <span>Rows: {attempt.output_row_count ?? 0} outputs · {attempt.trace_row_count ?? 0} traces · cleanup: {attempt.cleanup_status ?? 'unknown'}</span>
+              <span>Artifact checksum: {attempt.parquet_checksum ?? attempt.output_checksum ?? attempt.artifact_checksum ?? attempt.artifacts?.parquet_checksum ?? 'Unavailable'}</span>
               {attempt.executed_build && <details><summary>Build identity</summary><pre>{formatEvidenceJson(attempt.executed_build)}</pre></details>}
               {attempt.metrics && <details><summary>Attempt metrics</summary><pre>{formatEvidenceJson(attempt.metrics)}</pre></details>}
             </article>
@@ -249,6 +251,18 @@ export function ExecutionCenter({ onNotify, onBackToRunSets, onRefresh, runSet }
     if (!retryRunId || !runSet?.runs.some(run => run.id === retryRunId)) return
     document.getElementById(`execution-run-${retryRunId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [retryRunId, runSet?.runs])
+
+  if (!runSet) {
+    return (
+      <section className="execution-empty-state" role="status">
+        <h2>No Run Set selected</h2>
+        <p>Execution details appear here after you open a submitted Run Set.</p>
+        <button className="execution-back-button" onClick={onBackToRunSets ?? (() => setActiveScreen('Runs'))}>
+          <ArrowLeft size={16} />Back to Run Set Library
+        </button>
+      </section>
+    )
+  }
 
   if (runSet) {
     const counts = {

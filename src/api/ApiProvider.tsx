@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://samelias1-svcai.hf.space').replace(/\/+$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/').replace(/\/+$/, '')
 const TOKEN_KEY = 'mentor-amp-access-token'
 
 export type ApiUser = {

@@ -39,7 +39,13 @@ export function AdminSettings({ onNotify }: { onNotify: (message: string) => voi
   const membersQuery = useApiQuery<MembersResponse>(projectId ? `/v1/projects/${projectId}/members` : null)
   const statusQuery = useApiQuery<SystemStatus>('/v1/system/status')
   const usersQuery = useApiQuery<UsersResponse>(isAdmin ? '/v1/users/' : null)
-  const auditQuery = useApiQuery<AuditResponse>(isAdmin ? '/v1/audit-logs/?limit=10' : null)
+  const [auditEntity, setAuditEntity] = useState('')
+  const [auditActor, setAuditActor] = useState('')
+  const [auditOffset, setAuditOffset] = useState(0)
+  const auditPath = isAdmin
+    ? `/v1/audit-logs/?limit=10&offset=${auditOffset}${auditEntity.trim() ? `&entity_type=${encodeURIComponent(auditEntity.trim())}` : ''}${auditActor.trim() ? `&actor_user_id=${encodeURIComponent(auditActor.trim())}` : ''}`
+    : null
+  const auditQuery = useApiQuery<AuditResponse>(auditPath)
   const liveProject = projectQuery.data ?? project
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -76,6 +82,7 @@ export function AdminSettings({ onNotify }: { onNotify: (message: string) => voi
       return
     }
     setSection('Audit history')
+    setAuditOffset(0)
     auditQuery.refetch()
   }
   const members = membersQuery.data?.members ?? []
@@ -252,7 +259,7 @@ export function AdminSettings({ onNotify }: { onNotify: (message: string) => voi
             {isAdmin && <section className="admin-panel admin-activity-panel"><header className="admin-panel-heading"><h3>Recent activity</h3><button onClick={audit}>View audit history</button></header>{auditQuery.error && <p role="alert" className="admin-inline-error">Could not load audit history: {auditQuery.error.message}</p>}{auditQuery.loading && <p>Loading audit history…</p>}<div className="admin-activity-table"><div><span>Time</span><span>Actor ID</span><span>Action</span><span>Entity</span></div>{auditEntries.length ? auditEntries.slice(0, 4).map(entry => <div key={entry.id}><span>{new Date(entry.created_at).toLocaleString()}</span><span>{entry.actor_user_id ?? 'System'}</span><span>{entry.action}</span><span>{entry.entity_type} · {entry.entity_id}</span></div>) : !auditQuery.loading && !auditQuery.error && <div><span>—</span><span>—</span><span>None</span><span>No audit log entries were returned.</span></div>}</div></section>}
           </div>
         </div>
-        {section === 'Audit history' && isAdmin && <section className="admin-panel admin-audit-detail"><header className="admin-panel-heading"><h3>Audit history</h3><button className="admin-small-button" onClick={() => auditQuery.refetch()}>Refresh</button></header><p>Showing {auditEntries.length} of {auditQuery.data?.total ?? 0} newest audit entries.</p>{auditQuery.error && <p role="alert" className="admin-inline-error">{auditQuery.error.message}</p>}{auditEntries.map(entry => <article key={entry.id}><div><b>{entry.action}</b><span>{new Date(entry.created_at).toLocaleString()} · {entry.entity_type} {entry.entity_id}</span></div><small>Actor: {entry.actor_user_id ?? 'System'}</small><details><summary>Before / after / context</summary><pre>{JSON.stringify({ before_state: entry.before_state, after_state: entry.after_state, context: entry.context }, null, 2)}</pre></details></article>)}</section>}
+        {section === 'Audit history' && isAdmin && <section className="admin-panel admin-audit-detail"><header className="admin-panel-heading"><h3>Audit history</h3><button className="admin-small-button" onClick={() => auditQuery.refetch()}>Refresh</button></header><div className="admin-audit-filters"><label>Entity type<input value={auditEntity} onChange={event => { setAuditEntity(event.target.value); setAuditOffset(0) }} placeholder="e.g. model_version" /></label><label>Actor user ID<input value={auditActor} onChange={event => { setAuditActor(event.target.value); setAuditOffset(0) }} placeholder="User ID" /></label></div><p>Showing {auditEntries.length} of {auditQuery.data?.total ?? 0} newest audit entries.</p>{auditQuery.error && <p role="alert" className="admin-inline-error">{auditQuery.error.message}</p>}{auditQuery.loading && <p>Loading audit history…</p>}{auditEntries.map(entry => <article key={entry.id}><div><b>{entry.action}</b><span>{new Date(entry.created_at).toLocaleString()} · {entry.entity_type} {entry.entity_id}</span></div><small>Actor: {entry.actor_user_id ?? 'System'}</small><details><summary>Before / after / context</summary><pre>{JSON.stringify({ before_state: entry.before_state, after_state: entry.after_state, context: entry.context }, null, 2)}</pre></details></article>)}<div className="admin-audit-pagination"><button className="admin-small-button" disabled={auditOffset === 0 || auditQuery.loading} onClick={() => setAuditOffset(offset => Math.max(0, offset - 10))}>Previous</button><span>{auditOffset + 1}–{auditOffset + auditEntries.length} of {auditQuery.data?.total ?? 0}</span><button className="admin-small-button" disabled={auditQuery.loading || auditOffset + auditEntries.length >= (auditQuery.data?.total ?? 0)} onClick={() => setAuditOffset(offset => offset + 10)}>Next</button></div></section>}
         {section !== 'Workspace overview' && <div className="admin-section-notice"><Activity size={17} /><span><b>{section}</b><small>{section === 'Audit history' ? isAdmin ? 'Viewing entries from /v1/audit-logs/.' : 'Audit history requires a platform administrator role.' : 'This section is wired to the project and member APIs that are available in the backend.'}</small></span><button onClick={() => setSection('Workspace overview')} aria-label="Return to workspace overview"><X size={16} /></button></div>}
       </div>
     </div>

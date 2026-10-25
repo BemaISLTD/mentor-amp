@@ -2,11 +2,12 @@ import { Bell, CalendarDays, LogOut, Search } from 'lucide-react'
 import { useApp } from '../../context/useApp'
 import { useApi } from '../../api/ApiProvider'
 import { useWorkspace } from '../../api/WorkspaceContext'
+import { IllustrativeBadge } from '../ui/IllustrativeBadge'
 
 export function Topbar({ variant = 'default', searchValue = '', onSearchChange, searchPlaceholder = 'Search models, versions, owners...', modelName = 'MYGA Reserve Model', modelVersion = 'v3.2' }: { variant?: 'default' | 'library' | 'model-workspace' | 'mentor' | 'admin'; searchValue?: string; onSearchChange?: (value: string) => void; searchPlaceholder?: string; modelName?: string; modelVersion?: string }) {
   const { notify } = useApp()
   const { user, signOut } = useApi()
-  const { projects, project, selectProject } = useWorkspace()
+  const { projects, project, selectProject, activeProduct, setActiveProduct, systemStatus, systemStatusError, systemStatusLoading } = useWorkspace()
   const initials = user?.full_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'U'
   const today = new Date().toISOString().slice(0, 10)
   return <header className={`topbar max-[760px]:gap-2 ${variant === 'library' ? 'topbar-library min-h-[76px]' : ''}`}>
@@ -15,6 +16,18 @@ export function Topbar({ variant = 'default', searchValue = '', onSearchChange, 
     </div>
     <div className="topbar-actions max-[760px]:gap-2">
       {projects.length > 1 && <select className="workspace-project-select max-[760px]:max-w-[120px]" aria-label="Active project" value={project?.id ?? ''} onChange={event => selectProject(event.target.value)}>{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}
+      <label className="sr-only" htmlFor="global-product-filter">Filter by product</label>
+      <select id="global-product-filter" className="workspace-project-select max-[760px]:max-w-[90px]" aria-label="Filter by product" value={activeProduct} onChange={event => setActiveProduct(event.target.value)}>
+        <option value="All">All products</option>
+        {(systemStatus?.engine.products ?? []).map(product => <option key={product} value={product}>{product}</option>)}
+      </select>
+      {systemStatus && <span className="topbar-engine-status" title={`Backend ${systemStatus.status} · database ${systemStatus.database.status} · ${systemStatus.engine.execution_backend}`}>
+        <i className={systemStatus.status === 'ok' ? 'is-healthy' : 'is-degraded'} />
+        {systemStatus.engine.engine_version}
+      </span>}
+      {systemStatusLoading && <span className="topbar-engine-status" role="status">Checking backend…</span>}
+      {systemStatusError && <span className="topbar-engine-status is-degraded" role="alert" title={systemStatusError.message}>Backend unavailable</span>}
+      {activeProduct === 'MYGA' && <IllustrativeBadge />}
       <button className="icon-button has-dot" aria-label="Notifications" onClick={() => notify('No new notifications')}><Bell size={19} /></button>
       <button className="avatar max-[420px]:hidden" aria-label="Signed-in user" title={user?.email}>{initials}</button>
       <div className="profile-name max-[760px]:hidden"><strong>{user?.full_name}</strong><small>{user?.roles.join(', ')}</small></div>

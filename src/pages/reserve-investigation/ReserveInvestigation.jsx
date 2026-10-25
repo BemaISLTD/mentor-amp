@@ -444,7 +444,7 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   const [modelFilter, setModelFilter] = useState('All versions')
   const [projectionFilter, setProjectionFilter] = useState('All sets')
   const [policy, setPolicy] = useState('')
-  const [month, setMonth] = useState(0)
+  const [month, setMonth] = useState(1)
   const [variable, setVariable] = useState('')
   const [traceDepth, setTraceDepth] = useState(4)
   const selectedRun = runs.find(run => run.id === selectedRunId) ?? runs[0] ?? null
@@ -466,7 +466,7 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   useEffect(() => {
     if (outputs.length && !outputs.some(item => item.variable_name === variable)) setVariable(outputs[0].variable_name)
   }, [outputs, variable])
-  useEffect(() => { setPolicy(''); setMonth(0); setVariable('') }, [selectedRunId])
+  useEffect(() => { setPolicy(''); setMonth(1); setVariable('') }, [selectedRunId])
   const visibleRuns = runs.filter(run => {
     const searchable = `${run.name} ${run.id} ${run.model_version?.model_name ?? ''} ${run.projection_set?.name ?? ''} ${run.scenario?.name ?? ''}`.toLowerCase()
     const matchesStatus = statusFilter === 'All statuses'
@@ -480,7 +480,7 @@ function LiveInvestigationRunSelector({ onNotify, onOpenTrace }) {
   const hasTrace = tracedPolicies.length > 0
   const horizon = Math.max(0, (policiesQuery.data?.months ?? selectedRun?.horizon_months ?? 0) - 1)
   const canOpenTrace = Boolean(hasTrace && tracedPolicies.includes(policy.trim()) && month <= horizon && variable)
-  const selectRun = run => { setSelectedRunId(run.id); if (run.id !== selectedRunId) { setPolicy(''); setMonth(0) } }
+  const selectRun = run => { setSelectedRunId(run.id); if (run.id !== selectedRunId) { setPolicy(''); setMonth(1) } }
   return (
     <div className="investigation-selector-page">
       <header className="investigation-selector-heading">
@@ -540,6 +540,8 @@ function LiveTraceExplorerView({ target, onNotify, onBack }) {
   const traceQuery = useApiQuery(tracePath)
   const root = traceQuery.data?.root
   const nodes = root ? flattenTrace(root) : []
+  const nodeIndexByPath = new Map(nodes.map((node, index) => [node.id, index]))
+  const surrenderInputs = nodes.filter(node => node.month === target.month && /account_value_close|mgsv_close|surrender_benefit|surrender_charge/i.test(node.variable))
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [checkpoints, setCheckpoints] = useState([])
   useEffect(() => setSelectedIndex(0), [tracePath])
@@ -560,6 +562,9 @@ function LiveTraceExplorerView({ target, onNotify, onBack }) {
         {traceQuery.loading ? <div className="trace-graph-surface">Loading captured trace…</div> : traceQuery.error ? <div className="trace-graph-surface">Could not load trace: {traceQuery.error.message}</div> : nodes.length ? <div className="trace-graph-surface"><div className="trace-connectors" aria-hidden="true"><i/><i/><i/></div><div className="trace-node-grid">{nodes.map((node,index) => <div className="trace-node-column" key={node.id}><button aria-pressed={selectedIndex===index} className={`trace-node-card trace-node-${traceKind(node.kind)} ${selectedIndex===index?'trace-node-selected':''}`} onClick={() => setSelectedIndex(index)}><span>{traceIcon(node.kind)}</span><small>{node.kind}</small><b>{node.name}</b><em>{displayTraceValue(node.value,node.unit)}</em></button><span className="trace-node-action"><Database size={12}/>{node.source?.type || node.formula?.function_ref || 'Captured value'}</span>{index<nodes.length-1&&<ArrowRight className="trace-inline-arrow" size={17}/>}</div>)}</div></div> : <div className="trace-graph-surface">The trace response did not contain a calculation tree.</div>}
         {root && <p className="investigation-run-count">Run {target.run.id} · Policy {target.policyId} · Month {target.month} · {traceQuery.data?.illustrative ? 'Illustrative run' : 'Run output'}{traceQuery.data?.period_end_date ? ` · ${traceQuery.data.period_end_date}` : ''}</p>}
       </section>
+      {root && <section className="investigation-card trace-hierarchy-card"><h3>Recursive calculation tree</h3><p>Captured formula inputs are shown as recorded; values are not recalculated.</p><TraceTreeNode node={root} path="root" indexByPath={nodeIndexByPath} selectedIndex={selectedIndex} onSelect={setSelectedIndex}/></section>}
+      {surrenderInputs.length > 0 && <section className="investigation-card"><h3>Surrender benefit components</h3><p>Backend-captured values for this policy and month. The MGSV amount is shown as the recorded contractual floor input.</p>{surrenderInputs.map(node => <div key={node.id}><b>{node.name}</b><span>{displayTraceValue(node.value,node.unit)}</span></div>)}</section>}
+      {selected?.source?.type === 'factor' && <section className="investigation-card"><h3>Factor table lookup</h3><p>Table: {selected.source.table ?? 'Unavailable'} · Column: {selected.source.column ?? 'Unavailable'}</p><p>Lookup keys: {JSON.stringify(selected.source.lookup_keys ?? {})}</p><p>Dataset ID: {selected.source.dataset_id ?? 'Unavailable'} · Value: {displayTraceValue(selected.value,selected.unit)}</p></section>}
       <PinnedCheckpoints checkpoints={checkpoints} onAdd={addCheckpoint} onRemove={id=>setCheckpoints(items=>items.filter(item=>item.id!==id))} onNotify={onNotify}/>
       <section className="investigation-card scratchpad-card"><div className="investigation-card-heading scratchpad-heading"><Code2 size={20}/><h2>Scratchpad</h2><button disabled>Unavailable</button></div><article className="scratchpad-linked-card"><div className="scratchpad-block-heading"><span><Link2 size={14}/>Selected trace node</span><small>Read-only evidence</small></div><div className="scratchpad-linked-value"><span><Database size={17}/></span><div><b>{selected?.name || 'Select a trace node'}</b><small>{selected?.kind || '—'} · {selected ? displayTraceValue(selected.value,selected.unit) : '—'}</small></div><strong>{selected?.value == null ? '—' : displayTraceValue(selected.value,selected.unit)}</strong></div></article>
         <section className="trace-dependents-panel"><h3>What depends on this value?</h3>{dependentsQuery.loading && <p>Loading downstream dependents…</p>}{dependentsQuery.error && <p role="alert">Could not load dependents: {dependentsQuery.error.message}</p>}{dependentsQuery.data && !(dependentsQuery.data.dependents ?? []).length && <p>No downstream dependents were reported for this value.</p>}{(dependentsQuery.data?.dependents ?? []).map((dependent, index) => <article key={`${dependent.variable}-${dependent.month}-${index}`}><b>{dependent.variable}</b><span>{dependent.kind} · month {dependent.month} · {dependent.value == null ? 'No value' : displayTraceValue(dependent.value, selected?.unit)}{dependent.formula_id ? ` · formula ${dependent.formula_id}` : ''}</span></article>)}</section>
@@ -574,6 +579,12 @@ function flattenTrace(root) {
   const visit=(node,path='root')=>{ if(!node)return; const id=`${path}:${node.variable}:${node.month}`; result.push({id,name:node.display_name||node.variable,variable:node.variable,month:node.month,value:node.value,unit:node.unit,kind:node.kind,source:node.source,formula:node.formula,depth:path.split('.').length-1}); (node.children||[]).forEach((child,index)=>visit(child,`${path}.${index}`)) }
   visit(root)
   return result
+}
+function TraceTreeNode({ node, path, indexByPath, selectedIndex, onSelect }) {
+  if (!node) return null
+  const nodeId = `${path}:${node.variable}:${node.month}`
+  const index = indexByPath.get(nodeId)
+  return <div className="trace-hierarchy-node"><button aria-pressed={selectedIndex === index} className="trace-node-card" onClick={() => onSelect(index)}><span>{traceIcon(node.kind)}</span><small>{node.kind}</small><b>{node.display_name || node.variable}</b><em>{displayTraceValue(node.value,node.unit)}</em><small>{node.formula?.expression_text || node.formula?.function_ref || node.source?.type || 'Captured value'}</small></button>{node.children?.length > 0 && <div className="trace-hierarchy-children">{node.children.map((child,index) => <TraceTreeNode key={`${child.variable}-${child.month}-${index}`} node={child} path={`${path}.${index}`} indexByPath={indexByPath} selectedIndex={selectedIndex} onSelect={onSelect}/>)}</div>}</div>
 }
 function traceKind(kind) { return kind==='valuation'?'result':kind==='formula'?'formula':['input','assumption','factor','context'].includes(kind)?'input':'source' }
 function traceIcon(kind) { return kind==='formula'?<Code2 size={18}/>:kind==='valuation'?<Table2 size={18}/>:['input','assumption','factor'].includes(kind)?<Database size={17}/>:<Activity size={17}/> }

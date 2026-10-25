@@ -1,26 +1,24 @@
 import { useState } from 'react'
-import { Archive, ArrowLeft, Plus, RefreshCw, Save } from 'lucide-react'
+import { Archive, ArrowLeft, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, X } from 'lucide-react'
 import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { canImportData } from '../../api/permissions'
+import { IllustrativeBadge } from '../../components/ui/IllustrativeBadge'
 import './model-workspace.css'
 
 const statusLabel = status => (status ?? 'unknown').replaceAll('_', ' ')
+const reviewStatus = version => version?.published_at || version?.is_current ? 'published' : version?.status
+const hasReviewPermission = roles => roles.some(role => ['admin', 'actuary', 'reviewer'].includes(role.toLowerCase()))
 
 export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) {
   const { request, user } = useApi()
   const canEdit = canImportData(user?.roles ?? [])
+  const canReview = hasReviewPermission(user?.roles ?? [])
   const modelId = model?.id
   const detailQuery = useApiQuery(modelId ? `/v1/models/${encodeURIComponent(modelId)}` : null)
   const versionsQuery = useApiQuery(modelId ? `/v1/models/${encodeURIComponent(modelId)}/versions` : null)
   const detail = detailQuery.data
-  const listedVersions = versionsQuery.data?.versions ?? detail?.versions ?? []
-  const versions = listedVersions.length
-    ? listedVersions
-    : detail?.current_version
-      ? [detail.current_version]
-      : []
-  const usingCurrentVersionFallback = Boolean(versionsQuery.error && !listedVersions.length && detail?.current_version)
+  const versions = versionsQuery.data?.versions ?? detail?.versions ?? []
   const [selectedVersionId, setSelectedVersionId] = useState('')
   const selectedVersion = versions.find(version => version.id === selectedVersionId)
     ?? versions.find(version => version.is_current)
@@ -38,6 +36,9 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
   const [notesByVersion, setNotesByVersion] = useState({})
   const [saveBusy, setSaveBusy] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [validationResult, setValidationResult] = useState(null)
   const notes = selectedVersion
     ? notesByVersion[selectedVersion.id] ?? selectedVersion.notes ?? ''
     : ''
@@ -61,7 +62,7 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
       setSelectedVersionId(created.id)
       versionsQuery.refetch()
       detailQuery.refetch()
-      onNotify(`Draft ${created.version_label} created. It is not runnable until the backend provides a validation or approval workflow.`)
+      onNotify(`Draft ${created.version_label} created.`)
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'Could not create a model draft.')
     } finally {
@@ -98,6 +99,7 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
     try {
       await request(`/v1/model-versions/${encodeURIComponent(selectedVersion.id)}`, { method: 'DELETE' })
       setSelectedVersionId('')
+      setValidationResult(null)
       versionsQuery.refetch()
       detailQuery.refetch()
       onNotify(`Draft ${selectedVersion.version_label} archived.`)
@@ -108,6 +110,43 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
     }
   }
 
+  const runVersionAction = async (action, body = undefined) => {
+    if (!selectedVersion || saveBusy) return
+    setSaveBusy(true)
+    setActionError('')
+    try {
+      const result = await request(`/v1/model-versions/${encodeURIComponent(selectedVersion.id)}/${action}`, {
+        method: 'POST',
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+      if (action === 'validate') setValidationResult(result)
+      versionsQuery.refetch()
+      detailQuery.refetch()
+      structureQuery.refetch()
+      variablesQuery.refetch()
+      onNotify(action === 'validate'
+        ? `Model validation ${result.status ?? 'completed'}.`
+        : action === 'approve' ? 'Model version approved.'
+          : action === 'publish' ? 'Model version published and locked.'
+            : 'Model version rejected.')
+      if (action === 'reject') {
+        setRejectOpen(false)
+        setRejectReason('')
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : `Could not ${action} this model version.`)
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  const published = Boolean(selectedVersion?.published_at || selectedVersion?.is_current)
+  const selfApprovalForbidden = Boolean(user && (
+    selectedVersion?.created_by === user.id
+    || selectedVersion?.last_material_modified_by === user.id
+  ))
+  const approvalAllowed = canReview && !published && !selfApprovalForbidden && ['validated', 'needs_review'].includes(selectedVersion?.status)
+
   const structure = structureQuery.data
   const variables = variablesQuery.data?.variables ?? []
   const formulaGroups = structure?.formula_groups ?? []
@@ -116,7 +155,7 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
     <div className="model-workspace flex flex-col gap-4">
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[#dce3e9] bg-white p-4">
         <div className="min-w-0">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-[#71809f]">Model detail · {detail?.product_code ?? model?.product ?? '—'}</span>
+          <span className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-[#71809f]">Model detail · {detail?.product_code ?? model?.product ?? '—'}{(detail?.product_code ?? model?.product) === 'MYGA' && <IllustrativeBadge />}</span>
           <h2 className="mt-1 text-2xl font-bold text-[#101b37]">{detail?.name ?? model?.name ?? 'Model'}</h2>
           <p className="mt-1 text-xs text-[#71809f]">{detail?.description || 'No description'} · Model ID {detail?.id ?? modelId}</p>
         </div>
@@ -135,15 +174,14 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
               <span className="text-xs text-[#71809f]">{versions.length} versions</span>
             </div>
             {versionsQuery.loading && <p role="status">Loading model versions…</p>}
-            {versionsQuery.error && <p role="alert">{usingCurrentVersionFallback
-              ? `Could not load full version history: ${versionsQuery.error.message}. Showing the current version from model details.`
-              : `Could not load versions: ${versionsQuery.error.message}`}</p>}
-            <div className="mt-3 flex flex-col gap-2">{versions.map(version => (
-              <button key={version.id} aria-pressed={selectedVersion?.id === version.id} className={`w-full rounded-lg border p-3 text-left ${selectedVersion?.id === version.id ? 'border-[#80c51a] bg-[#f5faee]' : 'border-[#e2e8ed] bg-white'}`} onClick={() => { setSelectedVersionId(version.id); setEditingNotes(false) }}>
-                <span className="flex flex-wrap items-center justify-between gap-2"><b>{version.version_label}</b><span className="rounded-full bg-[#edf1f5] px-2 py-1 text-[10px] uppercase">{statusLabel(version.status)}{version.status === 'draft' ? ' · not runnable yet' : ''}</span></span>
-                <small className="mt-1 block text-[#71809f]">{version.basis ?? 'No basis'} · {version.is_current || version.id === detail?.current_version?.id ? 'Current' : 'Historical'} · {version.created_at ? new Date(version.created_at).toLocaleDateString() : 'Date unavailable'}</small>
+            {versionsQuery.error && <p role="alert">Could not load versions: {versionsQuery.error.message}</p>}
+            <div className="mt-3 flex flex-col gap-2">{versions.map(version => {
+              const versionPublished = Boolean(version.published_at || version.is_current)
+              return               <button key={version.id} aria-pressed={selectedVersion?.id === version.id} className={`w-full rounded-lg border p-3 text-left ${selectedVersion?.id === version.id ? 'border-[#80c51a] bg-[#f5faee]' : 'border-[#e2e8ed] bg-white'}`} onClick={() => { setSelectedVersionId(version.id); setEditingNotes(false); setValidationResult(null) }}>
+                <span className="flex flex-wrap items-center justify-between gap-2"><b>{version.version_label}</b><span className="rounded-full bg-[#edf1f5] px-2 py-1 text-[10px] uppercase">{statusLabel(reviewStatus(version))}{versionPublished ? ' · locked' : ''}{version.status === 'draft' ? ' · not runnable yet' : ''}</span></span>
+                <small className="mt-1 block text-[#71809f]">{version.basis ?? 'No basis'} · {versionPublished ? 'Write-once published version' : 'Historical'} · {version.created_at ? new Date(version.created_at).toLocaleDateString() : 'Date unavailable'}</small>
               </button>
-            ))}{!versionsQuery.loading && !versionsQuery.error && !versions.length && <p>No versions are listed for this model.</p>}</div>
+            })}{!versionsQuery.loading && !versionsQuery.error && !versions.length && <p>No versions are listed for this model.</p>}</div>
           </section>
 
           <section className="mw-card">
@@ -151,7 +189,17 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
             {structureQuery.loading && <p role="status">Loading model structure…</p>}
             {structureQuery.error && <p role="alert">Could not load structure: {structureQuery.error.message}</p>}
             {structure && <div className="mt-3">
-              {selectedVersion?.status === 'draft' && <p className="mb-3 rounded-md bg-[#fff7df] p-2 text-xs text-[#805d10]">This draft is not runnable yet. The backend does not expose model-version approval or validation.</p>}
+              {selectedVersion?.status === 'draft' && <p className="mb-3 rounded-md bg-[#fff7df] p-2 text-xs text-[#805d10]">This draft must be validated and independently approved before publication.</p>}
+              {selectedVersion && <div className="my-3 flex flex-wrap gap-2">
+                <button className="model-open-button" disabled={!canEdit || published || saveBusy} onClick={() => void runVersionAction('validate')}><ShieldCheck size={15} />{saveBusy ? 'Working…' : 'Validate model'}</button>
+                <button className="model-open-button" disabled={!approvalAllowed || saveBusy} title={selfApprovalForbidden ? 'Segregation of duties: you created or materially modified this version and cannot approve it.' : !canReview ? 'Model approval permission required.' : undefined} onClick={() => void runVersionAction('approve', {})}>Approve version</button>
+                <button className="model-open-button" disabled={!canReview || published || ['approved', 'rejected', 'superseded'].includes(selectedVersion.status) || saveBusy} onClick={() => { setRejectReason(''); setRejectOpen(true) }}>Reject version</button>
+                <button className="model-open-button" disabled={!canEdit || selectedVersion.status !== 'approved' || published || saveBusy} title={selectedVersion.status !== 'approved' ? 'Only independently approved versions can be published.' : undefined} onClick={() => void runVersionAction('publish')}><LockKeyhole size={15} />Publish version</button>
+              </div>}
+              {validationResult && <details className="mb-3 rounded-md border border-[#dce3e9] p-2" open><summary className="cursor-pointer text-xs font-bold">Latest validation: {validationResult.status ?? 'unknown'} · {validationResult.validation?.checks?.length ?? 0} checks</summary><ul className="mt-2 grid gap-1 text-xs">{(validationResult.validation?.checks ?? []).map((check, index) => <li key={`${check.code ?? check.name ?? 'check'}-${index}`} className={check.status === 'pass' ? 'text-[#37600b]' : 'text-[#805d10]'}><b>{check.status ?? 'unknown'}</b> · {check.label ?? check.code ?? check.name ?? 'Validation check'}{check.message ? ` — ${check.message}` : ''}</li>)}</ul>{validationResult.fingerprint && <small className="mt-2 block break-all text-[#71809f]">Fingerprint: {validationResult.fingerprint}</small>}</details>}
+              {selectedVersion && !canReview && <p className="text-xs text-[#71809f]">Approval and rejection require `models:approve` permission.</p>}
+              {selectedVersion && selfApprovalForbidden && <p className="text-xs text-[#805d10]">Segregation of duties: you created or materially modified this version and cannot approve it.</p>}
+              {published && <p className="mb-3 flex items-center gap-2 rounded-md bg-[#edf7df] p-2 text-xs text-[#37600b]"><LockKeyhole size={15} />Write-once published version. It cannot be edited or unpublished.</p>}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{Object.entries(structure.facts ?? {}).map(([label, value]) => <div className="rounded-md bg-[#f5f7f8] p-2" key={label}><small className="block text-[#71809f]">{label.replaceAll('_', ' ')}</small><b>{value}</b></div>)}</div>
               <h3 className="mt-4 font-bold">Hierarchy</h3>
               <div className="mt-2 flex flex-col">{(structure.hierarchy ?? []).map((item, index) => <div className="flex items-center justify-between gap-2 border-b border-[#edf0f2] py-2 text-xs" key={`${item.id ?? item.label}-${index}`} style={{ paddingLeft: `${Math.min(item.depth ?? 0, 8) * 14}px` }}><span>{item.label}</span><small className="text-[#71809f]">{item.level} · {item.meta}</small></div>)}</div>
@@ -165,6 +213,7 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
             <div><h2 className="text-base font-bold">Variables ({variablesQuery.data?.total ?? variables.length})</h2><p className="mt-1 text-xs text-[#71809f]">Definitions used by this model version.</p></div>
             {variablesQuery.loading && <p role="status">Loading variables…</p>}
             {variablesQuery.error && <p role="alert">Could not load variables: {variablesQuery.error.message}</p>}
+            {(detail?.product_code ?? model?.product) === 'MYGA' && variables.some(variable => variable.variable_name === 'death_benefit') && <aside className="my-3 rounded-md border border-[#f0d9a0] bg-[#fff9e9] p-3 text-xs text-[#694b11]" role="note"><b>STATUS: NEEDS ACTUARIAL PRODUCT OWNER DECISION</b><p className="mt-1">Implemented baseline, Option B: <code>max(account_value_close, surrender_benefit)</code>. This formula is not a final approved actuarial rule.</p><p className="mt-1">Option A (account value) and the product-owner-specified Option C remain alternatives pending formal confirmation.</p></aside>}
             <div className="mt-3 overflow-auto"><table className="w-full border-collapse text-left text-xs"><thead><tr className="border-b border-[#e2e8ed] text-[#71809f]"><th className="p-2">Variable</th><th className="p-2">Kind / type</th><th className="p-2">Unit</th><th className="p-2">Required</th><th className="p-2">Source</th></tr></thead><tbody>{variables.map(variable => <tr className="border-b border-[#edf0f2]" key={variable.id}><td className="p-2"><b>{variable.display_name}</b><small className="block text-[#71809f]">{variable.variable_name} · {variable.description}</small></td><td className="p-2">{variable.kind} / {variable.data_type}</td><td className="p-2">{variable.unit ?? '—'}</td><td className="p-2">{variable.required ? 'Yes' : 'No'}</td><td className="p-2">{variable.source?.type ?? '—'}</td></tr>)}</tbody></table></div>
           </section>
         </main>
@@ -194,6 +243,15 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
           </section>}
         </aside>
       </div>
+      {rejectOpen && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onClick={() => setRejectOpen(false)}>
+        <section aria-labelledby="model-reject-title" aria-modal="true" className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
+          <header className="flex items-center justify-between gap-3"><h2 className="text-lg font-bold" id="model-reject-title">Reject model version</h2><button aria-label="Close rejection dialog" onClick={() => setRejectOpen(false)}><X size={18} /></button></header>
+          <p className="my-3 text-sm text-[#71809f]">Provide a reason (at least 3 characters). This decision is recorded in the audit trail.</p>
+          <label className="grid gap-1 text-sm">Reason<textarea autoFocus className="min-h-24 rounded border p-2" maxLength={2000} value={rejectReason} onChange={event => setRejectReason(event.target.value)} /></label>
+          {actionError && <p role="alert" className="mt-2 text-sm text-red-700">{actionError}</p>}
+          <div className="mt-4 flex justify-end gap-2"><button className="model-open-button" onClick={() => setRejectOpen(false)}>Cancel</button><button className="model-open-button" disabled={rejectReason.trim().length < 3 || saveBusy} onClick={() => void runVersionAction('reject', { reason: rejectReason.trim() })}>{saveBusy ? 'Rejecting…' : 'Reject version'}</button></div>
+        </section>
+      </div>}
     </div>
   )
 }
