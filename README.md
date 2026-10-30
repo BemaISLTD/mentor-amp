@@ -21,3 +21,7 @@
    ```sh
    pnpm dev
    ```
+
+## M3 governance workflows
+
+Formula Studio, Expected Results benchmark management, and run reconciliation are available from the left navigation. See [M3 Frontend Workflows](./docs/M3_FRONTEND_IMPLEMENTATION.md) for routes, API behavior, permissions, and backend contract notes.

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Archive, ArrowLeft, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, X } from 'lucide-react'
+import { Archive, ArrowLeft, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, Workflow, X } from 'lucide-react'
 import { useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { canImportData } from '../../api/permissions'
@@ -10,7 +10,7 @@ const statusLabel = status => (status ?? 'unknown').replaceAll('_', ' ')
 const reviewStatus = version => version?.published_at || version?.is_current ? 'published' : version?.status
 const hasReviewPermission = roles => roles.some(role => ['admin', 'actuary', 'reviewer'].includes(role.toLowerCase()))
 
-export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) {
+export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack, onOpenFormulaStudio }) {
   const { request, user } = useApi()
   const canEdit = canImportData(user?.roles ?? [])
   const canReview = hasReviewPermission(user?.roles ?? [])
@@ -161,6 +161,7 @@ export function ModelWorkspace({ model, onNotify, onCreateProjection, onBack }) 
         </div>
         <div className="flex flex-wrap gap-2">
           {onBack && <button className="model-open-button" onClick={onBack}><ArrowLeft size={15} />Back to models</button>}
+          {selectedVersion && <button className="model-open-button" onClick={() => onOpenFormulaStudio?.(modelId, selectedVersion.id)}><Workflow size={15} />Formula Studio</button>}
           <button className="model-open-button" onClick={() => { detailQuery.refetch(); versionsQuery.refetch(); if (versionId) { structureQuery.refetch(); variablesQuery.refetch() } }}><RefreshCw size={15} />Refresh</button>
           <button className="model-open-button" onClick={onCreateProjection}>Create Projection Set</button>
         </div>

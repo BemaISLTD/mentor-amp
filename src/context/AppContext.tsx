@@ -2,8 +2,18 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { AppContext, type InvestigationIntent, type ProjectionInputs } from './context'
 import type { RunSetRecord, ScreenName } from '../types'
 
+function screenForPath(path: string): ScreenName {
+  if (/^\/models\/[^/]+\/versions\/[^/]+\/formulas\/?$/.test(path)) return 'Formula Studio'
+  if (path === '/formula-studio') return 'Formula Studio'
+  if (/^\/projects\/[^/]+\/benchmarks\/?$/.test(path)) return 'Benchmarks'
+  if (path === '/benchmarks') return 'Benchmarks'
+  if (/^\/runs\/[^/]+\/reconciliation\/?$/.test(path)) return 'Reconciliation'
+  if (path === '/reconciliation') return 'Reconciliation'
+  return 'Dashboard'
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [activeScreen, setActiveScreen] = useState<ScreenName>('Dashboard')
+  const [activeScreen, setActiveScreen] = useState<ScreenName>(() => screenForPath(window.location.pathname))
   const [toast, setToast] = useState('')
   const [investigationIntent, setInvestigationIntent] = useState<InvestigationIntent>(null)
   const [projectionSetupActive, setProjectionSetupActive] = useState(false)

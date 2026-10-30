@@ -40,10 +40,23 @@ function errorMessage(body: unknown, status: number): { message: string; code?: 
     return { message: 'You do not have permission to perform this action. Contact a project administrator if you need access.' }
   }
   if (body && typeof body === 'object') {
-    const payload = body as { detail?: unknown; error?: { message?: unknown; code?: unknown } }
-    const detail = payload.error?.message ?? payload.detail
-    if (typeof detail === 'string') return { message: detail, code: typeof payload.error?.code === 'string' ? payload.error.code : undefined }
-    if (detail && typeof detail === 'object') return { message: JSON.stringify(detail) }
+    const payload = body as { detail?: unknown; error?: { message?: unknown; code?: unknown }; code?: unknown; message?: unknown }
+    const detail = payload.error ?? payload.detail
+    if (detail && typeof detail === 'object') {
+      const error = detail as { message?: unknown; code?: unknown; details?: unknown }
+      const message = typeof error.message === 'string'
+        ? error.message
+        : typeof payload.message === 'string'
+          ? payload.message
+          : JSON.stringify(error.details ?? detail)
+      const code = typeof error.code === 'string'
+        ? error.code
+        : typeof payload.code === 'string'
+          ? payload.code
+          : undefined
+      return { message, code }
+    }
+    if (typeof detail === 'string') return { message: detail, code: typeof payload.code === 'string' ? payload.code : undefined }
   }
   return { message: `Backend request failed (${status}).` }
 }

@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-export type ScreenName = 'Dashboard' | 'Models' | 'Inputs' | 'Data Manager' | 'Scenarios' | 'Formulas' | 'Projections' | 'Runs' | 'Results' | 'Reports' | 'Investigate' | 'Mentor' | 'Admin / Settings'
+export type ScreenName = 'Dashboard' | 'Models' | 'Inputs' | 'Data Manager' | 'Scenarios' | 'Formulas' | 'Formula Studio' | 'Benchmarks' | 'Reconciliation' | 'Projections' | 'Runs' | 'Results' | 'Reports' | 'Investigate' | 'Mentor' | 'Admin / Settings'
 
 export type NavItem = { label: ScreenName; icon: LucideIcon; group?: string }
 export type ModelStatus = 'validated' | 'needs_review' | 'draft' | 'approved' | 'rejected' | 'superseded' | 'legacy_unvalidated' | 'published'

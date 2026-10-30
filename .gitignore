@@ -17,6 +17,9 @@ dist-ssr
 !.env.example
 new_screens
 FUNCTIONALITY_IDLE_LINKS_AUDIT.md
+docs
+e2e
+SAM_M3_FRONTEND_HANDOFF.md
 
 # Editor directories and files
 .vscode/*

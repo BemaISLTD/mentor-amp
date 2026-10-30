@@ -21,13 +21,15 @@ import { AdminSettings } from './pages/admin-settings/AdminSettings'
 import { DataManager } from './pages/data-manager/DataManager'
 import { ScreenErrorBoundary } from './components/ui/ScreenErrorBoundary'
 import type { Model } from './types'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ApiProvider } from './api/ApiProvider'
 import { AuthGate } from './api/AuthGate'
-import { WorkspaceGate, WorkspaceProvider } from './api/WorkspaceContext'
+import { useWorkspace, WorkspaceGate, WorkspaceProvider } from './api/WorkspaceContext'
+import { M3Workspace } from './pages/m3/M3Workspace'
 
 function RoutedApp() {
   const { activeScreen, notify, setActiveScreen, updateProjectionInputs, projectionSetupActive, setProjectionSetupActive, activeExecutionRunSetId } = useApp()
+  const { projectId } = useWorkspace()
   const [modelQuery, setModelQuery] = useState('')
   const [formulaQuery, setFormulaQuery] = useState('')
   const [formulaLineageActive, setFormulaLineageActive] = useState(false)
@@ -39,6 +41,17 @@ function RoutedApp() {
   const [startProjectionCreate, setStartProjectionCreate] = useState(false)
   const [dataManagerCategory, setDataManagerCategory] = useState<'liability_inforce' | 'assumption_table' | 'factor_table' | 'scenario'>('liability_inforce')
   const [inputWorkflowPage, setInputWorkflowPage] = useState('Input Library')
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname
+      setActiveScreen(/^\/models\/[^/]+\/versions\/[^/]+\/formulas\/?$/.test(path) || path === '/formula-studio' ? 'Formula Studio'
+        : /^\/projects\/[^/]+\/benchmarks\/?$/.test(path) || path === '/benchmarks' ? 'Benchmarks'
+          : /^\/runs\/[^/]+\/reconciliation\/?$/.test(path) || path === '/reconciliation' ? 'Reconciliation'
+            : 'Dashboard')
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [setActiveScreen])
   const isModelWorkspace = activeScreen === 'Models' && selectedModel !== null
   const startProjectionSetup = () => {
     setProjectionSetupActive(true)
@@ -79,6 +92,10 @@ function RoutedApp() {
     setStartProjectionCreate(true)
     setActiveScreen('Scenarios')
   }
+  const openFormulaStudio = (modelId: string, versionId: string) => {
+    window.history.pushState({}, '', `/models/${encodeURIComponent(modelId)}/versions/${encodeURIComponent(versionId)}/formulas`)
+    setActiveScreen('Formula Studio')
+  }
   const actions = (
     <button
       className="button button-secondary dashboard-search-button max-[760px]:min-w-0 max-[760px]:px-2.5 max-[760px]:py-2"
@@ -108,6 +125,10 @@ function RoutedApp() {
       modelName={isModelWorkspace ? selectedModel.name : undefined}
       modelVersion={isModelWorkspace ? selectedModel.version : undefined}
       onNavigate={(screen) => {
+        if (screen === 'Formula Studio') window.history.pushState({}, '', '/formula-studio')
+        else if (screen === 'Benchmarks') window.history.pushState({}, '', projectId ? `/projects/${projectId}/benchmarks` : '/benchmarks')
+        else if (screen === 'Reconciliation') window.history.pushState({}, '', '/reconciliation')
+        else if (/^\/(formula-studio|benchmarks|reconciliation|models\/[^/]+\/versions\/[^/]+\/formulas|projects\/[^/]+\/benchmarks|runs\/[^/]+\/reconciliation)\/?$/.test(window.location.pathname)) window.history.pushState({}, '', '/workspace')
         if (screen !== activeScreen) {
           setFormulaLineageActive(false)
           setFormulaDetailActive(false)
@@ -129,7 +150,7 @@ function RoutedApp() {
         <Dashboard />
       ) : activeScreen === 'Models' ? (
         isModelWorkspace ? (
-          <ModelWorkspace key={selectedModel?.id} model={selectedModel} onNotify={notify} onCreateProjection={startProjectionSetup} onBack={() => setActiveScreen('Models')} />
+          <ModelWorkspace key={selectedModel?.id} model={selectedModel} onNotify={notify} onCreateProjection={startProjectionSetup} onBack={() => setActiveScreen('Models')} onOpenFormulaStudio={openFormulaStudio} />
         ) : (
           <ModelLibrary query={modelQuery} onNotify={notify} onOpenModel={openModel} />
         )
@@ -154,7 +175,9 @@ function RoutedApp() {
       ) : activeScreen === 'Scenarios' ? (
         <ScenarioAnalysis onNotify={notify} onOpenProjectionSetup={startProjectionSetup} onOpenDataManager={openDataManager} />
       ) : activeScreen === 'Formulas' ? (
-        <FormulaLibrary query={formulaQuery} onNotify={notify} onLineageChange={setFormulaLineageActive} onDetailChange={setFormulaDetailActive} />
+        <FormulaLibrary query={formulaQuery} onNotify={notify} onLineageChange={setFormulaLineageActive} onDetailChange={setFormulaDetailActive} onOpenFormulaStudio={openFormulaStudio} />
+      ) : activeScreen === 'Formula Studio' || activeScreen === 'Benchmarks' || activeScreen === 'Reconciliation' ? (
+        <M3Workspace screen={activeScreen} />
       ) : activeScreen === 'Runs' ? (
         <RunSetWorkflow onNotify={notify} />
       ) : activeScreen === 'Projections' ? (
