@@ -471,6 +471,24 @@
   color: #267343;
 }
 
+.m3-status-pill.is-validated {
+  border-color: #c9dff2;
+  background: #edf6fd;
+  color: #27628e;
+}
+
+.m3-status-pill.is-approved {
+  border-color: #c5e5d0;
+  background: #edf8f1;
+  color: #267343;
+}
+
+.m3-status-pill.is-superseded {
+  border-color: #efdfa9;
+  background: #fff9e8;
+  color: #795d1c;
+}
+
 .m3-formula-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
@@ -900,6 +918,11 @@
   background: linear-gradient(110deg, #fff4f3, #fff);
 }
 
+.m3-report-banner.is-not-verifiable {
+  border-color: #efdfa9;
+  background: linear-gradient(110deg, #fff9e8, #fff);
+}
+
 .m3-report-banner h2 {
   margin: 4px 0;
   color: #217341;
@@ -908,6 +931,16 @@
 
 .m3-report-banner.is-fail h2 {
   color: #a13b36;
+}
+
+.m3-report-banner.is-not-verifiable h2 {
+  color: #795d1c;
+}
+
+.m3-warning-text {
+  color: #795d1c;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .m3-report-banner p {
@@ -947,6 +980,36 @@
   border-color: #efdfa9;
   background: #fff9e8;
   color: #795d1c;
+}
+
+.m3-benchmark-actions {
+  min-width: 115px;
+}
+
+.m3-benchmark-actions > .m3-text-button {
+  margin-right: 5px;
+}
+
+.m3-benchmark-actions > small,
+.m3-governance-hint {
+  display: block;
+  color: #8a6413;
+  font-size: 10px;
+}
+
+.m3-benchmark-governance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 12px;
+}
+
+.m3-benchmark-governance > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #71859a;
+  font-size: 11px;
 }
 
 .m3-report-metrics {

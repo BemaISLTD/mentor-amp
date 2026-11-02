@@ -36,9 +36,6 @@ type ApiContextValue = {
 const ApiContext = createContext<ApiContextValue | null>(null)
 
 function errorMessage(body: unknown, status: number): { message: string; code?: string } {
-  if (status === 403) {
-    return { message: 'You do not have permission to perform this action. Contact a project administrator if you need access.' }
-  }
   if (body && typeof body === 'object') {
     const payload = body as { detail?: unknown; error?: { message?: unknown; code?: unknown }; code?: unknown; message?: unknown }
     const detail = payload.error ?? payload.detail
@@ -57,6 +54,9 @@ function errorMessage(body: unknown, status: number): { message: string; code?: 
       return { message, code }
     }
     if (typeof detail === 'string') return { message: detail, code: typeof payload.code === 'string' ? payload.code : undefined }
+  }
+  if (status === 403) {
+    return { message: 'You do not have permission to perform this action. Contact a project administrator if you need access.' }
   }
   return { message: `Backend request failed (${status}).` }
 }

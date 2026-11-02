@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
-import { Check, Clipboard, FileUp, LoaderCircle, RefreshCw, Upload, X } from 'lucide-react'
+import { Check, Clipboard, FileUp, LoaderCircle, RefreshCw, ShieldCheck, Upload, X } from 'lucide-react'
 import { ApiError, useApi } from '../../api/ApiProvider'
 import { useApiQuery } from '../../api/useApiQuery'
 import { useWorkspace } from '../../api/WorkspaceContext'
-import { canImportData } from '../../api/permissions'
+import { canImportData, canReviewData } from '../../api/permissions'
 import { useFocusTrap } from './useFocusTrap'
 import type { ExpectedResultSet } from './types'
 
@@ -51,6 +51,8 @@ export function BenchmarkManager({ routeProjectId }: { routeProjectId?: string }
   const projectId = routeProjectId || activeProjectId
   const { request, user } = useApi()
   const canUpload = canImportData(user?.roles ?? [])
+  const canApprove = canReviewData(user?.roles ?? [])
+  const canSupersede = canApprove || canUpload
   const listQuery = useApiQuery<{ expected_result_sets: ExpectedResultSet[] }>(projectId ? `/v1/projects/${projectId}/expected-results` : null)
   const sets = listQuery.data?.expected_result_sets ?? []
   const inputRef = useRef<HTMLInputElement>(null)
@@ -67,23 +69,73 @@ export function BenchmarkManager({ routeProjectId }: { routeProjectId?: string }
   const [dragging, setDragging] = useState(false)
   const [selectedId, setSelectedId] = useState('')
   const [copiedId, setCopiedId] = useState('')
+  const [governanceError, setGovernanceError] = useState('')
+  const [governanceSuccess, setGovernanceSuccess] = useState('')
+  const [governanceBusyId, setGovernanceBusyId] = useState('')
+  const [supersedeTarget, setSupersedeTarget] = useState<ExpectedResultSet | null>(null)
+  const [supersededById, setSupersededById] = useState('')
   const detailQuery = useApiQuery<ExpectedResultSet>(selectedId ? `/v1/expected-results/${selectedId}?include_rows=true` : null)
   const selectedSet = sets.find(item => item.id === selectedId)
   const uploadDialogRef = useRef<HTMLElement | null>(null)
   const previewDialogRef = useRef<HTMLElement | null>(null)
+  const supersedeDialogRef = useRef<HTMLElement | null>(null)
   useFocusTrap(uploadDialogRef, uploadOpen)
   useFocusTrap(previewDialogRef, Boolean(selectedId))
+  useFocusTrap(supersedeDialogRef, Boolean(supersedeTarget))
   useEffect(() => {
-    if (!uploadOpen && !selectedId) return
+    if (!uploadOpen && !selectedId && !supersedeTarget) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !uploadBusy) {
         setUploadOpen(false)
         setSelectedId('')
+        setSupersedeTarget(null)
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [uploadOpen, selectedId, uploadBusy])
+  }, [uploadOpen, selectedId, supersedeTarget, uploadBusy])
+  const supersedingOptions = supersedeTarget
+    ? sets.filter(item => item.id !== supersedeTarget.id
+      && item.product_code === supersedeTarget.product_code
+      && item.status.toLowerCase() !== 'superseded')
+    : []
+
+  const approveBenchmark = async (item: ExpectedResultSet) => {
+    setGovernanceError('')
+    setGovernanceSuccess('')
+    setGovernanceBusyId(item.id)
+    try {
+      const approved = await request<ExpectedResultSet>(`/v1/expected-results/${item.id}/approve`, { method: 'POST' })
+      setGovernanceSuccess(`Approved ${approved.name}.`)
+      listQuery.refetch()
+    } catch (error) {
+      setGovernanceError(errorText(error))
+    } finally {
+      setGovernanceBusyId('')
+    }
+  }
+
+  const supersedeBenchmark = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supersedeTarget || !supersededById) return
+    setGovernanceError('')
+    setGovernanceSuccess('')
+    setGovernanceBusyId(supersedeTarget.id)
+    try {
+      const updated = await request<ExpectedResultSet>(`/v1/expected-results/${supersedeTarget.id}/supersede`, {
+        method: 'POST',
+        body: JSON.stringify({ superseded_by_id: supersededById }),
+      })
+      setGovernanceSuccess(`Superseded ${updated.name}.`)
+      setSupersedeTarget(null)
+      setSupersededById('')
+      listQuery.refetch()
+    } catch (error) {
+      setGovernanceError(errorText(error))
+    } finally {
+      setGovernanceBusyId('')
+    }
+  }
 
   const selectFile = async (nextFile?: File) => {
     setUploadError('')
@@ -188,6 +240,8 @@ export function BenchmarkManager({ routeProjectId }: { routeProjectId?: string }
       <button className="m3-primary-button" type="button" onClick={() => { setUploadOpen(true); setUploadError(''); setUploadSuccess('') }} disabled={!projectId || !canUpload}><Upload size={16} />Upload benchmark</button>
     </header>
     {uploadSuccess && <div className="m3-success-banner" role="status"><Check size={17} />{uploadSuccess}</div>}
+    {governanceSuccess && <div className="m3-success-banner" role="status"><Check size={17} />{governanceSuccess}</div>}
+    {governanceError && <div className="m3-inline-error" role="alert">{governanceError}</div>}
     {!projectId && <div className="m3-inline-error" role="alert">Select a project before managing benchmarks.</div>}
     {listQuery.loading && sets.length === 0 && <div className="m3-panel"><div className="m3-loading" role="status"><LoaderCircle className="m3-spin" />Loading benchmarks…</div></div>}
     {listQuery.error && <div className="m3-panel"><div className="m3-inline-error" role="alert">{listQuery.error.message}<button className="m3-text-button" type="button" onClick={listQuery.refetch}><RefreshCw size={14} />Retry</button></div></div>}
@@ -196,7 +250,29 @@ export function BenchmarkManager({ routeProjectId }: { routeProjectId?: string }
       <div className="m3-section-heading"><div><h3>Project benchmarks</h3><span>{sets.length} dataset{sets.length === 1 ? '' : 's'}</span></div><button className="m3-icon-button" type="button" aria-label="Refresh benchmarks" onClick={listQuery.refetch}><RefreshCw size={16} /></button></div>
       {copiedId && <span className="sr-only" role="status">{sets.find(item => item.id === copiedId)?.name ?? 'Benchmark'} fingerprint copied to clipboard.</span>}
       <div className="m3-table-scroll"><table className="m3-table"><thead><tr><th>Name</th><th>Product</th><th>Granularity</th><th>Rows</th><th>Fingerprint</th><th>Created</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        {sets.map(item => <tr key={item.id}><td><b>{item.name}</b><small>{item.version_label}</small></td><td>{item.product_code}</td><td>{item.granularity}</td><td>{item.row_count.toLocaleString()}</td><td><code title={item.fingerprint}>{item.fingerprint.slice(0, 14)}…</code><button className="m3-inline-icon" type="button" aria-label={`Copy fingerprint for ${item.name}`} onClick={() => void copyFingerprint(item)}>{copiedId === item.id ? <Check size={14} /> : <Clipboard size={14} />}</button></td><td>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</td><td><span className="m3-status-pill is-pass">{item.status}</span></td><td><button className="m3-text-button" type="button" onClick={() => setSelectedId(item.id)}>View data</button></td></tr>)}
+        {sets.map(item => {
+          const itemStatus = item.status.toLowerCase()
+          const canApproveItem = canApprove && itemStatus === 'validated'
+          const isCreator = Boolean(user?.id && item.created_by === user.id)
+          const successorCount = sets.filter(candidate => candidate.id !== item.id
+            && candidate.product_code === item.product_code
+            && candidate.status.toLowerCase() !== 'superseded').length
+          return <tr key={item.id}>
+            <td><b>{item.name}</b><small>{item.version_label}</small></td>
+            <td>{item.product_code}</td>
+            <td>{item.granularity}</td>
+            <td>{item.row_count.toLocaleString()}</td>
+            <td><code title={item.fingerprint}>{item.fingerprint.slice(0, 14)}…</code><button className="m3-inline-icon" type="button" aria-label={`Copy fingerprint for ${item.name}`} onClick={() => void copyFingerprint(item)}>{copiedId === item.id ? <Check size={14} /> : <Clipboard size={14} />}</button></td>
+            <td>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</td>
+            <td><span className={`m3-status-pill ${benchmarkStatusClass(itemStatus)}`}>{item.status}</span></td>
+            <td className="m3-benchmark-actions">
+              <button className="m3-text-button" type="button" onClick={() => setSelectedId(item.id)}>View data</button>
+              {canApproveItem && <button className="m3-text-button" type="button" aria-label={`Approve ${item.name}`} disabled={isCreator || governanceBusyId === item.id} title={isCreator ? 'The creator cannot approve their own benchmark; a different reviewer must approve it.' : undefined} onClick={() => void approveBenchmark(item)}>{governanceBusyId === item.id ? 'Approving…' : 'Approve'}{isCreator && <small className="m3-governance-hint">Creator cannot self-approve</small>}</button>}
+              {canSupersede && itemStatus !== 'superseded' && successorCount > 0 && <button className="m3-text-button" type="button" aria-label={`Supersede ${item.name}`} disabled={governanceBusyId === item.id} onClick={() => { setGovernanceError(''); setSupersedeTarget(item); setSupersededById('') }}>Supersede</button>}
+              {item.superseded_by_id && <small>Replaced by {sets.find(candidate => candidate.id === item.superseded_by_id)?.version_label ?? item.superseded_by_id}</small>}
+            </td>
+          </tr>
+        })}
       </tbody></table></div>
     </section>}
     {uploadOpen && <div className="m3-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !uploadBusy) setUploadOpen(false) }}>
@@ -228,11 +304,30 @@ export function BenchmarkManager({ routeProjectId }: { routeProjectId?: string }
         {detailQuery.error && <div className="m3-inline-error" role="alert">{detailQuery.error.message}<button className="m3-text-button" type="button" onClick={detailQuery.refetch}>Retry</button></div>}
         {detailQuery.data && <>
           <div className="m3-benchmark-metadata"><span>{detailQuery.data.product_code}</span><span>{detailQuery.data.granularity}</span><span>{detailQuery.data.timing_convention ?? 'Timing not specified'}</span><span>{detailQuery.data.row_count.toLocaleString()} rows</span><code>{detailQuery.data.fingerprint}</code></div>
+          <div className="m3-benchmark-governance"><span>Status <b className={`m3-status-pill ${benchmarkStatusClass(detailQuery.data.status.toLowerCase())}`}>{detailQuery.data.status}</b></span>{detailQuery.data.approved_by && <span>Approved by <b>{detailQuery.data.approved_by}</b></span>}{detailQuery.data.approved_at && <span>Approved at <b>{new Date(detailQuery.data.approved_at).toLocaleString()}</b></span>}{detailQuery.data.superseded_by_id && <span>Superseded by <b>{sets.find(item => item.id === detailQuery.data?.superseded_by_id)?.name ?? detailQuery.data.superseded_by_id}</b></span>}</div>
           <DataPreview rows={(detailQuery.data.rows ?? []).slice(0, 50)} columns={detailQuery.data.columns_detected ?? []} total={detailQuery.data.row_count} />
         </>}
       </section>
     </div>}
+    {supersedeTarget && <div className="m3-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && governanceBusyId !== supersedeTarget.id) setSupersedeTarget(null) }}>
+      <section ref={supersedeDialogRef} tabIndex={-1} className="m3-modal" role="dialog" aria-modal="true" aria-labelledby="m3-supersede-title">
+        <div className="m3-section-heading"><div><span className="m3-eyebrow">BENCHMARK GOVERNANCE</span><h2 id="m3-supersede-title">Supersede {supersedeTarget.name}</h2></div><button className="m3-icon-button" type="button" aria-label="Close supersede dialog" onClick={() => setSupersedeTarget(null)} disabled={governanceBusyId === supersedeTarget.id}><X size={18} /></button></div>
+        <p className="m3-muted">Choose the replacement benchmark for {supersedeTarget.product_code}. Only benchmarks in this project with the same product are available.</p>
+        <form onSubmit={supersedeBenchmark}>
+          <label>Replacement benchmark<select required value={supersededById} onChange={event => setSupersededById(event.target.value)}><option value="">Select a replacement…</option>{supersedingOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.version_label} · {item.status}</option>)}</select></label>
+          {governanceError && <div className="m3-inline-error" role="alert">{governanceError}</div>}
+          <div className="m3-modal-actions"><button type="button" className="m3-secondary-button" onClick={() => setSupersedeTarget(null)} disabled={governanceBusyId === supersedeTarget.id}>Cancel</button><button type="submit" className="m3-primary-button" disabled={governanceBusyId === supersedeTarget.id || !supersededById}>{governanceBusyId === supersedeTarget.id ? <LoaderCircle className="m3-spin" size={16} /> : <ShieldCheck size={16} />}{governanceBusyId === supersedeTarget.id ? 'Superseding…' : 'Confirm supersede'}</button></div>
+        </form>
+      </section>
+    </div>}
   </section>
+}
+
+function benchmarkStatusClass(status: string): string {
+  if (status === 'approved') return 'is-approved'
+  if (status === 'superseded') return 'is-superseded'
+  if (status === 'validated') return 'is-validated'
+  return ''
 }
 
 function DataPreview({ rows, columns, total }: { rows: Record<string, unknown>[]; columns: string[]; total: number }) {

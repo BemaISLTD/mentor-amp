@@ -110,13 +110,19 @@ export type ExpectedResultSet = {
   columns_detected: string[]
   fingerprint: string
   status: string
+  created_by?: string | null
+  approved_by?: string | null
+  approved_at?: string | null
+  superseded_by_id?: string | null
   created_at: string
+  scenario_id?: string | null
   rows?: Record<string, unknown>[]
 }
 
 export type ReconciliationFailure = {
   level: string
   policy_id?: string | null
+  scenario_id?: string | null
   projection_month?: number | null
   variable: string
   actual?: number | null
@@ -151,7 +157,7 @@ export type ReconciliationReport = {
   project_id: string
   run_id: string
   expected_result_set_id: string
-  status: 'PASS' | 'FAIL' | string
+  status: 'PASS' | 'FAIL' | 'NOT_VERIFIABLE' | string
   level: string
   variables_requested: string[]
   expected_result_fingerprint?: string | null

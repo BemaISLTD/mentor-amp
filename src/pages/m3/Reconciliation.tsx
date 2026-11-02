@@ -14,6 +14,7 @@ type RunContext = {
   name?: string
   project_id?: string
   status?: string
+  scenario?: { id?: string; name?: string } | null
   model_version?: { product_code?: string; model_name?: string; version_label?: string }
 }
 type RunSet = { id: string; name: string; runs?: { id: string; name?: string; status?: string }[] }
@@ -27,8 +28,8 @@ function messageFor(error: unknown): string {
     EXPECTED_RESULTS_PRODUCT_MISMATCH: 'Select a benchmark that matches the run product.',
     EXPECTED_RESULTS_TIMING_MISMATCH: 'Benchmark and run timing conventions differ.',
     EXPECTED_RESULTS_GRANULARITY_MISMATCH: 'The selected reconciliation level is incompatible with this benchmark.',
-    RECONCILIATION_CANNOT_APPROVE_FAILED: 'A failed report must be approved with exception.',
-    RECONCILIATION_EXCEPTION_REASON_REQUIRED: 'Enter at least five characters describing the exception.',
+    RECONCILIATION_CANNOT_APPROVE_FAILED: 'Reports with status FAIL or NOT_VERIFIABLE require an exception disposition.',
+    RECONCILIATION_EXCEPTION_REASON_REQUIRED: 'Enter at least three characters describing the exception.',
     RECONCILIATION_DISPOSITION_INVALID: 'Choose an allowed disposition and provide the required notes.',
     RECONCILIATION_DISPOSITION: 'Choose an allowed disposition and provide the required notes.',
   }
@@ -72,6 +73,7 @@ export function Reconciliation({ initialRunId, navigate, user }: Props) {
   const runBelongsToProject = Boolean(run && (!projectId || !run.project_id || run.project_id === projectId))
   const reportQuery = useApiQuery<ReconciliationReport>(reportId ? `/v1/reconciliations/${reportId}` : null)
   const report = reportQuery.data
+  const reportBenchmark = report ? benchmarks.find(item => item.id === report.expected_result_set_id) : undefined
   const reportsQuery = useApiQuery<{ reconciliations: ReconciliationReport[] }>(runId ? `/v1/runs/${runId}/reconciliations` : null)
   const canDisposition = canReviewData(user?.roles ?? [])
   const product = run?.model_version?.product_code
@@ -81,7 +83,7 @@ export function Reconciliation({ initialRunId, navigate, user }: Props) {
   const visibleFailures = useMemo(() => {
     const query = failureFilter.trim().toLowerCase()
     if (!query) return failures
-    return failures.filter(item => `${item.level} ${item.policy_id ?? ''} ${item.projection_month ?? ''} ${item.variable} ${item.actual ?? ''} ${item.expected ?? ''}`.toLowerCase().includes(query))
+    return failures.filter(item => `${item.level} ${item.policy_id ?? ''} ${item.scenario_id ?? ''} ${item.projection_month ?? ''} ${item.variable} ${item.actual ?? ''} ${item.expected ?? ''}`.toLowerCase().includes(query))
   }, [failures, failureFilter])
 
   useEffect(() => {
@@ -168,12 +170,12 @@ export function Reconciliation({ initialRunId, navigate, user }: Props) {
     setDispositionError('')
     if (!report) return
     const cleanNotes = notes.trim()
-    if (report.status === 'FAIL' && disposition === 'approved') {
-      setDispositionError('A failed report cannot be approved without exception.')
+    if (report.status !== 'PASS' && disposition === 'approved') {
+      setDispositionError('Only a PASS report can be approved without exception. Choose an exception disposition.')
       return
     }
-    if ((disposition === 'approved_with_exception' || disposition === 'exception_noted') && cleanNotes.length < 5) {
-      setDispositionError('Reviewer notes must contain at least five characters for an exception.')
+    if ((disposition === 'approved_with_exception' || disposition === 'exception_noted') && cleanNotes.length < 3) {
+      setDispositionError('Reviewer notes must contain at least three characters for an exception.')
       return
     }
     setDispositionBusy(true)
@@ -196,7 +198,7 @@ export function Reconciliation({ initialRunId, navigate, user }: Props) {
   return <section className="m3-workspace">
     <header className="m3-page-heading">
       <div><span className="m3-eyebrow">ACTUARIAL VALIDATION</span><h2>Run Reconciliation</h2><p>Compare a completed run to a governed benchmark, inspect differences, and record reviewer disposition.</p></div>
-      {report && canDisposition && <button className="m3-primary-button" type="button" onClick={() => { setDispositionOpen(true); setDispositionError(''); setDisposition('approved'); setNotes('') }}><ShieldCheck size={16} />Review &amp; sign off</button>}
+      {report && canDisposition && <button className="m3-primary-button" type="button" onClick={() => { setDispositionOpen(true); setDispositionError(''); setDisposition(report.status === 'PASS' ? 'approved' : 'approved_with_exception'); setNotes('') }}><ShieldCheck size={16} />Review &amp; sign off</button>}
     </header>
     <section className="m3-panel">
       <div className="m3-section-heading"><div><span className="m3-eyebrow">RECONCILIATION SETUP</span><h3>Select a completed run and benchmark</h3></div></div>
@@ -231,19 +233,19 @@ export function Reconciliation({ initialRunId, navigate, user }: Props) {
     {runId && reportsQuery.data?.reconciliations?.length ? <section className="m3-panel"><div className="m3-section-heading"><div><h3>Previous reports for this run</h3></div></div><div className="m3-report-list">{reportsQuery.data.reconciliations.map(item => <button key={item.id} type="button" className={`m3-report-choice ${item.id === reportId ? 'is-selected' : ''}`} onClick={() => setReportId(item.id)}><b>{item.status}</b><span>{item.level} · {item.created_at ? new Date(item.created_at).toLocaleString() : item.id}</span></button>)}</div></section> : null}
     {reportId && reportQuery.loading && !report && <section className="m3-panel"><div className="m3-loading" role="status"><LoaderCircle className="m3-spin" />Loading reconciliation report…</div></section>}
     {reportId && reportQuery.error && <section className="m3-panel"><div className="m3-inline-error" role="alert">{reportQuery.error.message}<button className="m3-text-button" type="button" onClick={reportQuery.refetch}>Retry</button></div></section>}
-    {report && <ReportView report={report} failureFilter={failureFilter} setFailureFilter={setFailureFilter} visibleFailures={visibleFailures} canDisposition={canDisposition} dispositionSuccess={dispositionSuccess} onOpenDisposition={() => { setDispositionOpen(true); setDispositionError(''); setDisposition('approved'); setNotes('') }} />}
+    {report && <ReportView report={report} expectedResultName={reportBenchmark?.name} scenario={run?.scenario} failureFilter={failureFilter} setFailureFilter={setFailureFilter} visibleFailures={visibleFailures} canDisposition={canDisposition} dispositionSuccess={dispositionSuccess} onOpenDisposition={() => { setDispositionOpen(true); setDispositionError(''); setDisposition(report.status === 'PASS' ? 'approved' : 'approved_with_exception'); setNotes('') }} />}
     {dispositionOpen && report && <div className="m3-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !dispositionBusy) setDispositionOpen(false) }}>
       <section ref={dispositionDialogRef} tabIndex={-1} className="m3-modal" role="dialog" aria-modal="true" aria-labelledby="m3-disposition-title">
         <div className="m3-section-heading"><div><span className="m3-eyebrow">REVIEWER ACTION</span><h2 id="m3-disposition-title">Actuary sign-off</h2></div><button autoFocus className="m3-icon-button" type="button" aria-label="Close disposition dialog" onClick={() => setDispositionOpen(false)} disabled={dispositionBusy}><X size={18} /></button></div>
-        <p>Report status: <b className={report.status === 'PASS' ? 'm3-success-text' : 'm3-error-text'}>{report.status}</b></p>
+        <p>Report status: <b className={report.status === 'PASS' ? 'm3-success-text' : report.status === 'FAIL' ? 'm3-error-text' : 'm3-warning-text'}>{report.status}</b></p>
         <form onSubmit={submitDisposition}>
           <fieldset className="m3-disposition-options"><legend>Disposition</legend>
-            <label className={report.status === 'FAIL' ? 'is-disabled' : ''}><input type="radio" name="disposition" value="approved" checked={disposition === 'approved'} disabled={report.status === 'FAIL'} onChange={() => setDisposition('approved')} />Approve{report.status === 'FAIL' && <small>Cannot approve a failing report without exception.</small>}</label>
+            <label className={report.status !== 'PASS' ? 'is-disabled' : ''}><input type="radio" name="disposition" value="approved" checked={disposition === 'approved'} disabled={report.status !== 'PASS'} onChange={() => setDisposition('approved')} />Approve{report.status !== 'PASS' && <small>Only a PASS report can be approved without exception.</small>}</label>
             <label><input type="radio" name="disposition" value="approved_with_exception" checked={disposition === 'approved_with_exception'} onChange={() => setDisposition('approved_with_exception')} />Approve with Exception</label>
             <label><input type="radio" name="disposition" value="exception_noted" checked={disposition === 'exception_noted'} onChange={() => setDisposition('exception_noted')} />Record Exception (no approval)</label>
             <label><input type="radio" name="disposition" value="rejected" checked={disposition === 'rejected'} onChange={() => setDisposition('rejected')} />Reject</label>
           </fieldset>
-          <label className="m3-field-label">Reviewer notes{(disposition === 'approved_with_exception' || disposition === 'exception_noted') && <span className="m3-required"> · required, minimum 5 characters</span>}<textarea rows={4} value={notes} onChange={event => setNotes(event.target.value)} aria-required={disposition === 'approved_with_exception' || disposition === 'exception_noted'} /></label>
+          <label className="m3-field-label">Reviewer notes{(disposition === 'approved_with_exception' || disposition === 'exception_noted') && <span className="m3-required"> · required, minimum 3 characters</span>}<textarea rows={4} value={notes} onChange={event => setNotes(event.target.value)} aria-required={disposition === 'approved_with_exception' || disposition === 'exception_noted'} /></label>
           {dispositionError && <div className="m3-inline-error" role="alert">{dispositionError}</div>}
           <div className="m3-modal-actions"><button type="button" className="m3-secondary-button" onClick={() => setDispositionOpen(false)} disabled={dispositionBusy}>Cancel</button><button type="submit" className="m3-primary-button" disabled={dispositionBusy}>{dispositionBusy ? 'Saving…' : 'Submit disposition'}</button></div>
         </form>
@@ -252,8 +254,10 @@ export function Reconciliation({ initialRunId, navigate, user }: Props) {
   </section>
 }
 
-function ReportView({ report, failureFilter, setFailureFilter, visibleFailures, canDisposition, dispositionSuccess, onOpenDisposition }: {
+function ReportView({ report, expectedResultName, scenario, failureFilter, setFailureFilter, visibleFailures, canDisposition, dispositionSuccess, onOpenDisposition }: {
   report: ReconciliationReport
+  expectedResultName?: string
+  scenario?: { id?: string; name?: string } | null
   failureFilter: string
   setFailureFilter: (value: string) => void
   visibleFailures: ReconciliationFailure[]
@@ -265,6 +269,13 @@ function ReportView({ report, failureFilter, setFailureFilter, visibleFailures, 
   const source = summary.source_to_output_check
   const sourceState = source?.status?.toUpperCase() ?? 'NOT_VERIFIABLE'
   const sourceLabel = sourceState === 'PASS' ? 'SOURCE VERIFIED' : sourceState === 'FAIL' ? 'SOURCE MISMATCH' : 'SOURCE NOT VERIFIABLE'
+  const reportStatus = report.status.toUpperCase()
+  const reportStatusClass = reportStatus === 'PASS' ? 'pass' : reportStatus === 'FAIL' ? 'fail' : 'not-verifiable'
+  const failureCount = summary.total_failures_count ?? summary.cells_failed ?? report.failures.length
+  const scenarioIds = [...new Set(report.failures.map(item => item.scenario_id).filter((value): value is string => Boolean(value)))]
+  const scenarioEvidence = scenario?.name
+    ? `${scenario.name}${scenario.id ? ` (${scenario.id})` : ''}`
+    : scenario?.id ?? (scenarioIds.join(', ') || '—')
   const reportedLevelRows = Object.entries(summary.by_level ?? summary.per_level_summary ?? {})
   const checkedCells = summary.cells_checked ?? summary.total_cells_checked
   const levelRows: [string, { cells_checked?: number; cells_failed?: number }][] = reportedLevelRows.length
@@ -274,27 +285,27 @@ function ReportView({ report, failureFilter, setFailureFilter, visibleFailures, 
       : []
   const variableRows = Object.entries(summary.by_variable ?? summary.per_variable_summary ?? {})
   return <section className="m3-report-stack">
-    <article className={`m3-report-banner ${report.status === 'PASS' ? 'is-pass' : 'is-fail'}`}><div><span className="m3-eyebrow">RECONCILIATION RESULT</span><h2>{report.status}</h2><p>Run {report.run_id} · {report.level} · report {report.id}</p></div><span className={`m3-source-pill source-${sourceState.toLowerCase()}`}>{sourceLabel}</span></article>
+    <article className={`m3-report-banner is-${reportStatusClass}`}><div><span className="m3-eyebrow">RECONCILIATION RESULT</span><h2>{report.status}</h2><p>Run {report.run_id} · {report.level} · report {report.id}</p></div><span className={`m3-source-pill source-${sourceState.toLowerCase()}`}>{sourceLabel}</span></article>
     {dispositionSuccess && <div className="m3-success-banner" role="status"><Check size={16} />{dispositionSuccess}</div>}
     <div className="m3-report-metrics">
       <Metric label="Cells checked" value={checkedCells} />
-      <Metric label="Cells failed" value={summary.cells_failed} />
+      <Metric label="Cells failed" value={summary.cells_failed ?? failureCount} />
       <Metric label="Max absolute diff" value={summary.max_abs_diff} />
       <Metric label="Max relative diff" value={summary.max_rel_diff} />
     </div>
     <section className="m3-panel">
       <div className="m3-section-heading"><div><span className="m3-eyebrow">AUDIT SNAPSHOT</span><h3>Comparison evidence</h3></div>{canDisposition && <button className="m3-secondary-button" type="button" onClick={onOpenDisposition}><ShieldCheck size={15} />Review &amp; sign off</button>}</div>
-      <div className="m3-audit-grid"><span>Benchmark version <b>{report.expected_result_version ?? '—'}</b></span><span>Timing convention <b>{report.timing_convention_snapshot ?? '—'}</b></span><span>Granularity <b>{report.granularity_snapshot ?? '—'}</b></span><span>Absolute tolerance <b>{report.abs_tol}</b></span><span>Relative tolerance <b>{report.rel_tol}</b></span><span>Fingerprint <code>{report.expected_result_fingerprint ?? '—'}</code></span><span>Disposition <b>{report.disposition_status ?? 'pending'}</b></span><span>Reviewer <b>{report.disposition_by ?? '—'}</b></span><span>Reviewed at <b>{report.disposition_at ? new Date(report.disposition_at).toLocaleString() : '—'}</b></span></div>
+      <div className="m3-audit-grid"><span>Expected results set <b>{expectedResultName ?? report.expected_result_set_id}</b></span><span>Expected-result version <b>{report.expected_result_version ?? '—'}</b></span><span>Scenario <b>{scenarioEvidence}</b></span><span>Reconciliation status <b>{report.status}</b></span><span>Timing convention <b>{report.timing_convention_snapshot ?? '—'}</b></span><span>Granularity <b>{report.granularity_snapshot ?? '—'}</b></span><span>Failure count <b>{failureCount}</b></span><span>Absolute tolerance <b>{report.abs_tol}</b></span><span>Relative tolerance <b>{report.rel_tol}</b></span><span>Fingerprint <code>{report.expected_result_fingerprint ?? '—'}</code></span><span>Disposition <b>{report.disposition_status ?? 'pending'}</b></span><span>Reviewer <b>{report.disposition_by ?? '—'}</b></span><span>Reviewed at <b>{report.disposition_at ? new Date(report.disposition_at).toLocaleString() : '—'}</b></span></div>
       {source && <div className={`m3-source-detail source-${sourceState.toLowerCase()}`}><b>{sourceLabel}</b><span>{sourceDetail(source)}</span>{source.inforce_rows_checked != null && <span>Inforce rows checked: {source.inforce_rows_checked}</span>}{source.source_policy_count != null && <span>Source policies: {source.source_policy_count}</span>}{source.actual_policy_count != null && <span>Run policies: {source.actual_policy_count}</span>}</div>}
     </section>
     <section className="m3-report-breakdowns">
       <article className="m3-panel"><div className="m3-section-heading"><h3>By variable</h3></div>{variableRows.length ? <div className="m3-table-scroll"><table className="m3-table"><thead><tr><th>Variable</th><th>Cells checked</th><th>Cells failed</th><th>Max abs diff</th></tr></thead><tbody>{variableRows.map(([name, value]) => <tr key={name}><td>{name}</td><td>{value.cells_checked ?? '—'}</td><td>{value.cells_failed ?? '—'}</td><td>{money(value.max_abs_diff)}</td></tr>)}</tbody></table></div> : <p className="m3-muted">No variable breakdown was returned.</p>}</article>
       <article className="m3-panel"><div className="m3-section-heading"><h3>By comparison level</h3></div>{levelRows.length ? <div className="m3-table-scroll"><table className="m3-table"><thead><tr><th>Level</th><th>Cells checked</th><th>Cells failed</th></tr></thead><tbody>{levelRows.map(([name, value]) => <tr key={name}><td>{name}</td><td>{value.cells_checked ?? '—'}</td><td>{value.cells_failed ?? '—'}</td></tr>)}</tbody></table></div> : <p className="m3-muted">No level breakdown was returned.</p>}</article>
     </section>
-    {report.status === 'FAIL' && <section className="m3-panel">
+    {(reportStatus === 'FAIL' || failureCount > 0 || report.failures.length > 0) && <section className="m3-panel">
       <div className="m3-section-heading"><div><span className="m3-eyebrow">CELL-LEVEL DIFFERENCES</span><h3>Failed comparison cells</h3><span>{summary.total_failures_count ?? report.failures.length} failure(s)</span></div><label className="m3-search-label">Filter failures<input value={failureFilter} onChange={event => setFailureFilter(event.target.value)} placeholder="Policy, month, variable…" /></label></div>
       {summary.failures_truncated && <div className="m3-inline-warning" role="status">Showing the first {report.failures.length.toLocaleString()} failures. The backend caps retained detail at 1,000 cells; total failures: {(summary.total_failures_count ?? report.failures.length).toLocaleString()}.</div>}
-      {!visibleFailures.length ? <div className="m3-empty-state"><CircleAlert size={20} /><p>{report.failures.length ? 'No failures match this filter.' : 'The report has no cell-level failure details.'}</p></div> : <div className="m3-table-scroll"><table className="m3-table"><thead><tr><th>Level</th><th>Policy ID</th><th>Month</th><th>Variable</th><th>Actual</th><th>Expected</th><th>Abs diff</th><th>Rel diff</th><th>Tolerance</th></tr></thead><tbody>{visibleFailures.map((failure, index) => <tr key={`${failure.level}-${failure.policy_id}-${failure.projection_month}-${failure.variable}-${index}`}><td>{failure.level}</td><td>{failure.policy_id ?? '—'}</td><td>{failure.projection_month ?? '—'}</td><td>{failure.variable}</td><td>{money(failure.actual)}</td><td>{money(failure.expected)}</td><td>{money(failure.abs_diff)}</td><td>{money(failure.rel_diff)}</td><td>±{money(failure.abs_tol)} / {money(failure.rel_tol)} rel</td></tr>)}</tbody></table></div>}
+      {!visibleFailures.length ? <div className="m3-empty-state"><CircleAlert size={20} /><p>{report.failures.length ? 'No failures match this filter.' : 'The report has no cell-level failure details.'}</p></div> : <div className="m3-table-scroll"><table className="m3-table"><thead><tr><th>Level</th><th>Policy ID</th><th>Scenario</th><th>Month</th><th>Variable</th><th>Actual</th><th>Expected</th><th>Abs diff</th><th>Rel diff</th><th>Tolerance</th></tr></thead><tbody>{visibleFailures.map((failure, index) => <tr key={`${failure.level}-${failure.policy_id}-${failure.projection_month}-${failure.variable}-${index}`}><td>{failure.level}</td><td>{failure.policy_id ?? '—'}</td><td>{failure.scenario_id ?? '—'}</td><td>{failure.projection_month ?? '—'}</td><td>{failure.variable}</td><td>{money(failure.actual)}</td><td>{money(failure.expected)}</td><td>{money(failure.abs_diff)}</td><td>{money(failure.rel_diff)}</td><td>±{money(failure.abs_tol)} / {money(failure.rel_tol)} rel</td></tr>)}</tbody></table></div>}
     </section>}
     <section className="m3-panel"><div className="m3-section-heading"><div><span className="m3-eyebrow">AUDIT HISTORY</span><h3>Disposition timeline</h3></div><span className="m3-status-pill">{report.disposition_status ?? 'pending'}</span></div>
       {report.disposition_history?.length ? <ol className="m3-timeline">{report.disposition_history.map((item, index) => <li key={`${item.at ?? item.timestamp ?? index}-${index}`}><i /><div><b>{item.to_status ?? item.disposition_status ?? item.action ?? 'Disposition recorded'}</b><span>{item.at ?? item.timestamp ? new Date(item.at ?? item.timestamp ?? '').toLocaleString() : 'Timestamp unavailable'} · {item.by ?? item.user ?? item.actor ?? 'Reviewer'}</span>{item.notes && <p>{item.notes}</p>}</div></li>)}</ol> : <div className="m3-empty-state"><p>No reviewer disposition has been recorded.</p></div>}
